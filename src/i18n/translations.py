@@ -282,9 +282,9 @@ TRANSLATIONS = {
 }
 
 
-def tr(key: str, lang: str = "ar", **kwargs) -> str:
+def tr(key: str, lang: str = "en", **kwargs) -> str:
     """Translate a key to the requested language with optional formatting."""
-    lang_dict = TRANSLATIONS.get(lang, TRANSLATIONS["ar"])
+    lang_dict = TRANSLATIONS.get(lang, TRANSLATIONS["en"])
     text = lang_dict.get(key, TRANSLATIONS["en"].get(key, key))
     if kwargs:
         try:

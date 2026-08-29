@@ -439,7 +439,7 @@ class MainWindow(QWidget):
         # Apply layout direction ONLY to inner tabs/content, keeping title bar layout cleanly pinned
         self.content_container.setLayoutDirection(Qt.RightToLeft if is_rtl else Qt.LeftToRight)
 
-        self.lang_btn.setText("English" if lang == "ar" else "العربية")
+        self.lang_btn.setText("العربية" if lang == "en" else "English")
         self.title_label.setText(tr("app_name", lang))
 
         self.nav_tabs.setTabText(0, f"📊 {tr('tab_dashboard', lang)}")

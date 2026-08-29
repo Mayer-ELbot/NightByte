@@ -12,7 +12,7 @@ logger = logging.getLogger("NightByte.Config")
 
 DEFAULT_CONFIG = {
     # General & Localization
-    "language": "ar",                   # "ar" or "en"
+    "language": "en",                   # "ar" or "en"
     "theme": "cyberpunk_dark",          # "cyberpunk_dark", "oled_black", "steam_blue"
     "minimize_to_tray": True,
     "close_to_tray": True,
