@@ -1,119 +1,106 @@
 """
-NightByte AI - Modern Minimalist Live Speed Graph
-Smooth vector waveform curve with soft gradient fill that blends seamlessly into card surfaces.
+NightByte AI — Speed Graph Widget
+Clean white line on dark background.  Zero colour noise.
 """
 
 from PySide6.QtWidgets import QWidget
 from PySide6.QtCore import Qt, QPointF
-from PySide6.QtGui import (
-    QPainter, QPen, QBrush, QColor, QLinearGradient, 
-    QPainterPath, QFont
-)
+from PySide6.QtGui import QPainter, QPen, QColor, QPainterPath, QLinearGradient, QFont
 
 
-class LiveSpeedGraph(QWidget):
-    """Custom high-performance vector speed graph widget."""
+class SpeedGraph(QWidget):
+    """Minimal waveform: white bezier curve with very subtle dark-grey fill."""
+
+    MAX_POINTS = 80
+    LINE_COLOR = QColor("#ffffff")
+    FILL_TOP   = QColor(40, 40, 40, 180)
+    FILL_BOT   = QColor(20, 20, 20, 0)
+    AXIS_COLOR = QColor("#444444")
+    LABEL_COLOR= QColor("#444444")
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMinimumHeight(110)
-        self.history = [0.0] * 60
-        self.current_speed = 0.0
-        self.peak_speed = 0.0
-        
-        # Color palette (Modern Blue Glow)
-        self.line_color = QColor("#38bdf8")        # Sky 400
-        self.fill_color_top = QColor(56, 189, 248, 60)
-        self.fill_color_bot = QColor(56, 189, 248, 2)
-        self.grid_color = QColor(255, 255, 255, 12)
-        self.text_color = QColor(100, 116, 139)    # Slate 500
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self._points: list[float] = []
+        self._max_val: float = 1.0
 
-    def update_history(self, history: list[float], current: float, peak: float):
-        self.history = history[-60:] if len(history) >= 60 else ([0.0] * (60 - len(history))) + history
-        self.current_speed = current
-        self.peak_speed = max(peak, max(self.history, default=0.0))
+    # ── public API ───────────────────────────────────────────────
+    def add_point(self, value: float):
+        self._points.append(max(0.0, value))
+        if len(self._points) > self.MAX_POINTS:
+            self._points.pop(0)
+        self._max_val = max(max(self._points) * 1.15, 1.0)
         self.update()
 
-    def _format_speed(self, kb_s: float) -> str:
-        if kb_s >= 1024.0:
-            return f"{kb_s / 1024.0:.1f} MB/s"
-        return f"{kb_s:.0f} KB/s"
+    def clear(self):
+        self._points.clear()
+        self._max_val = 1.0
+        self.update()
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setRenderHint(QPainter.TextAntialiasing, True)
-
-        w = self.width()
-        h = self.height()
-        padding_top = 18
-        padding_bottom = 16
-        padding_left = 8
-        padding_right = 58
-
-        plot_w = w - padding_left - padding_right
-        plot_h = h - padding_top - padding_bottom
-
-        # Transparent canvas background (blends into parent card)
-        painter.fillRect(0, 0, w, h, QColor(0, 0, 0, 0))
-
-        max_val = max(100.0, self.peak_speed * 1.15)
-
-        # Draw clean grid lines
-        grid_pen = QPen(self.grid_color, 1, Qt.DashLine)
-        painter.setPen(grid_pen)
-        painter.setFont(QFont("Segoe UI", 8))
-
-        for ratio in [0.0, 0.5, 1.0]:
-            y = padding_top + plot_h * (1.0 - ratio)
-            painter.drawLine(int(padding_left), int(y), int(padding_left + plot_w), int(y))
-            val_at_line = max_val * ratio
-            painter.setPen(self.text_color)
-            painter.drawText(int(padding_left + plot_w + 6), int(y + 4), self._format_speed(val_at_line))
-            painter.setPen(grid_pen)
-
-        if not self.history or plot_w <= 0 or plot_h <= 0:
+    # ── painting ─────────────────────────────────────────────────
+    def paintEvent(self, _):
+        if len(self._points) < 2:
             return
 
-        points = []
-        n_samples = len(self.history)
-        dx = plot_w / max(1, n_samples - 1)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
 
-        for i, val in enumerate(self.history):
-            x = padding_left + i * dx
-            norm = min(1.0, max(0.0, val / max_val))
-            y = padding_top + plot_h * (1.0 - norm)
-            points.append(QPointF(x, y))
+        W, H = self.width(), self.height()
+        PAD_R, PAD_B = 58, 8
+        PAD_T, PAD_L = 8, 0
+        gw = W - PAD_L - PAD_R
+        gh = H - PAD_T - PAD_B
 
-        # Bezier path
+        def pt(i: int) -> QPointF:
+            n = len(self._points)
+            x = PAD_L + i * gw / (n - 1)
+            y = PAD_T + gh - (self._points[i] / self._max_val) * gh
+            return QPointF(x, y)
+
+        # build smooth bezier path
         path = QPainterPath()
-        path.moveTo(points[0])
-        for i in range(1, len(points)):
-            p0 = points[i - 1]
-            p1 = points[i]
-            cx = (p0.x() + p1.x()) / 2.0
-            path.cubicTo(cx, p0.y(), cx, p1.y(), p1.x(), p1.y())
+        path.moveTo(pt(0))
+        for i in range(1, len(self._points)):
+            c1 = QPointF((pt(i - 1).x() + pt(i).x()) / 2, pt(i - 1).y())
+            c2 = QPointF((pt(i - 1).x() + pt(i).x()) / 2, pt(i).y())
+            path.cubicTo(c1, c2, pt(i))
 
-        # Gradient fill
-        fill_path = QPainterPath(path)
-        fill_path.lineTo(padding_left + plot_w, padding_top + plot_h)
-        fill_path.lineTo(padding_left, padding_top + plot_h)
-        fill_path.closeSubpath()
+        # fill under curve
+        fill = QPainterPath(path)
+        fill.lineTo(pt(len(self._points) - 1).x(), PAD_T + gh)
+        fill.lineTo(PAD_L, PAD_T + gh)
+        fill.closeSubpath()
 
-        grad = QLinearGradient(0, padding_top, 0, padding_top + plot_h)
-        grad.setColorAt(0.0, self.fill_color_top)
-        grad.setColorAt(1.0, self.fill_color_bot)
-        painter.fillPath(fill_path, QBrush(grad))
+        grad = QLinearGradient(0, PAD_T, 0, PAD_T + gh)
+        grad.setColorAt(0, self.FILL_TOP)
+        grad.setColorAt(1, self.FILL_BOT)
+        p.fillPath(fill, grad)
 
-        # Top stroke
-        curve_pen = QPen(self.line_color, 2.0, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
-        painter.setPen(curve_pen)
-        painter.drawPath(path)
+        # line
+        pen = QPen(self.LINE_COLOR, 1.5, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin)
+        p.setPen(pen)
+        p.drawPath(path)
 
-        # Pulse dot on last point
-        last_pt = points[-1]
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(56, 189, 248, 80))
-        painter.drawEllipse(last_pt, 5, 5)
-        painter.setBrush(QColor("#38bdf8"))
-        painter.drawEllipse(last_pt, 2.5, 2.5)
+        # glow dot at last point
+        last = pt(len(self._points) - 1)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#ffffff"))
+        p.drawEllipse(last, 3.5, 3.5)
+
+        # axis labels (right side)
+        font = QFont("Segoe UI", 9)
+        font.setWeight(QFont.DemiBold)
+        p.setFont(font)
+        p.setPen(self.LABEL_COLOR)
+
+        def fmt(v: float) -> str:
+            if v >= 1024:
+                return f"{v/1024:.1f} MB/s"
+            return f"{v:.0f} KB/s"
+
+        for frac, val in [(0.0, self._max_val), (0.5, self._max_val * 0.5), (1.0, 0.0)]:
+            y = PAD_T + frac * gh
+            p.drawText(int(W - PAD_R + 4), int(y + 4), fmt(val if frac < 1 else 0))
+
+        p.end()

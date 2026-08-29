@@ -1,200 +1,160 @@
 """
-SteamDown Ultra AI - On-Screen Countdown HUD Dialog
-Sleek floating warning dialog with instant abort and snooze buttons.
+NightByte AI — Countdown Warning Dialog
+Minimal dark floating HUD. English-only.
 """
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame, QGraphicsDropShadowEffect
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame
 )
-from PySide6.QtCore import Qt, QPoint
-from PySide6.QtGui import QColor, QFont
-from i18n.translations import tr
-from utils.config import ConfigManager
+from PySide6.QtCore import Qt, QPoint, Signal
+from PySide6.QtGui import QFont
 
 
 class CountdownWarningDialog(QDialog):
-    """Floating on-screen warning window showing circular countdown and abort controls."""
+    """Floating always-on-top countdown HUD."""
 
-    def __init__(self, duration_sec: int, action_name: str, engine=None, parent=None):
+    cancelled = Signal()
+    snoozed   = Signal(int)   # seconds to snooze
+
+    STYLE = """
+        QDialog { background: transparent; }
+        #CountdownCard {
+            background-color: #111111;
+            border: 1.5px solid #333333;
+            border-radius: 16px;
+        }
+        #CDTitle {
+            color: #ffffff;
+            font-size: 15px;
+            font-weight: 800;
+        }
+        #CDAction {
+            color: #888888;
+            font-size: 12px;
+            font-weight: 600;
+            background: #1c1c1c;
+            border-radius: 6px;
+            padding: 4px 12px;
+        }
+        #CDDigits {
+            color: #ffffff;
+            font-size: 64px;
+            font-weight: 900;
+        }
+        #CDDesc {
+            color: #555555;
+            font-size: 12px;
+        }
+        #AbortBtn {
+            background-color: #ffffff;
+            color: #000000;
+            border: none;
+            border-radius: 9px;
+            font-size: 13px;
+            font-weight: 800;
+            padding: 11px 20px;
+            min-height: 42px;
+        }
+        #AbortBtn:hover { background-color: #e0e0e0; }
+        #SnoozeBtn {
+            background-color: #1c1c1c;
+            color: #888888;
+            border: 1px solid #2a2a2a;
+            border-radius: 7px;
+            padding: 7px 12px;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        #SnoozeBtn:hover { background-color: #252525; color: #cccccc; border-color: #444; }
+    """
+
+    def __init__(self, duration_sec: int, action_label: str, parent=None):
         super().__init__(parent)
-        self.duration_sec = duration_sec
-        self.remaining_sec = duration_sec
-        self.action_name = action_name
-        self.engine = engine
-        self.config = ConfigManager()
-        
+        self.duration_sec  = duration_sec
+        self.action_label  = action_label
+
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
-        self.setFixedSize(460, 320)
-        
+        self.setStyleSheet(self.STYLE)
+        self.setFixedSize(440, 300)
+
         self.dragging = False
         self.drag_position = QPoint()
-        
-        self.setup_ui()
-        self.update_tick(duration_sec)
 
-    def setup_ui(self):
-        lang = self.config.get("language", "ar")
-        
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(15, 15, 15, 15)
+        self._build()
+        self.digits_label.setText(str(duration_sec))
 
-        # Container Frame with Glass styling
-        self.card = QFrame()
-        self.card.setObjectName("CountdownCard")
-        self.card.setStyleSheet("""
-            #CountdownCard {
-                background-color: #0f172a;
-                border: 2px solid #ef4444;
-                border-radius: 16px;
-            }
-            #Title {
-                color: #f87171;
-                font-size: 16px;
-                font-weight: bold;
-            }
-            #Description {
-                color: #cbd5e1;
-                font-size: 12px;
-            }
-            #Digits {
-                color: #ef4444;
-                font-size: 56px;
-                font-weight: 900;
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }
-            #ActionTag {
-                background-color: #1e293b;
-                color: #38bdf8;
-                border: 1px solid #334155;
-                border-radius: 6px;
-                padding: 4px 10px;
-                font-size: 12px;
-                font-weight: bold;
-            }
-            #AbortButton {
-                background-color: #ef4444;
-                color: #ffffff;
-                border: none;
-                border-radius: 8px;
-                font-size: 14px;
-                font-weight: bold;
-                padding: 10px 20px;
-            }
-            #AbortButton:hover {
-                background-color: #dc2626;
-            }
-            #SnoozeButton {
-                background-color: #1e293b;
-                color: #94a3b8;
-                border: 1px solid #334155;
-                border-radius: 6px;
-                padding: 6px 10px;
-                font-size: 11px;
-                font-weight: 500;
-            }
-            #SnoozeButton:hover {
-                background-color: #334155;
-                color: #f8fafc;
-            }
-        """)
+    def _build(self):
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(12, 12, 12, 12)
 
-        # Drop shadow effect
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(25)
-        shadow.setColor(QColor(239, 68, 68, 120))
-        shadow.setOffset(0, 4)
-        self.card.setGraphicsEffect(shadow)
+        card = QFrame()
+        card.setObjectName("CountdownCard")
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(24, 22, 24, 20)
+        lay.setSpacing(10)
+        lay.setAlignment(Qt.AlignCenter)
 
-        card_layout = QVBoxLayout(self.card)
-        card_layout.setContentsMargins(24, 20, 24, 20)
-        card_layout.setSpacing(10)
-        card_layout.setAlignment(Qt.AlignCenter)
+        title = QLabel("⚠  Downloads Completed")
+        title.setObjectName("CDTitle")
+        title.setAlignment(Qt.AlignCenter)
+        lay.addWidget(title)
 
-        # Title
-        title_label = QLabel(tr("countdown_title", lang))
-        title_label.setObjectName("Title")
-        title_label.setAlignment(Qt.AlignCenter)
-        card_layout.addWidget(title_label)
+        action_lbl = QLabel(f"⚡  {self.action_label}")
+        action_lbl.setObjectName("CDAction")
+        action_lbl.setAlignment(Qt.AlignCenter)
+        lay.addWidget(action_lbl, 0, Qt.AlignCenter)
 
-        # Action tag
-        action_tr = tr(f"action_{self.action_name}", lang) if self.action_name else self.action_name
-        self.action_tag = QLabel(f"⚡ {action_tr}")
-        self.action_tag.setObjectName("ActionTag")
-        self.action_tag.setAlignment(Qt.AlignCenter)
-        card_layout.addWidget(self.action_tag)
-
-        # Big Countdown Digits
-        self.digits_label = QLabel(str(self.duration_sec))
-        self.digits_label.setObjectName("Digits")
+        self.digits_label = QLabel("60")
+        self.digits_label.setObjectName("CDDigits")
         self.digits_label.setAlignment(Qt.AlignCenter)
-        card_layout.addWidget(self.digits_label)
+        lay.addWidget(self.digits_label)
 
-        # Description
-        desc_label = QLabel(tr("countdown_desc", lang))
-        desc_label.setObjectName("Description")
-        desc_label.setAlignment(Qt.AlignCenter)
-        desc_label.setWordWrap(True)
-        card_layout.addWidget(desc_label)
+        desc = QLabel("Shutdown executes at zero.  Cancel or snooze anytime.")
+        desc.setObjectName("CDDesc")
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
 
-        # Big Cancel Button
-        self.abort_btn = QPushButton(f"🛑 {tr('btn_cancel_countdown', lang)}")
-        self.abort_btn.setObjectName("AbortButton")
-        self.abort_btn.setCursor(Qt.PointingHandCursor)
-        self.abort_btn.clicked.connect(self._on_abort_clicked)
-        card_layout.addWidget(self.abort_btn)
+        abort = QPushButton("🛑  Cancel Shutdown")
+        abort.setObjectName("AbortBtn")
+        abort.setCursor(Qt.PointingHandCursor)
+        abort.clicked.connect(self._abort)
+        lay.addWidget(abort)
 
-        # Snooze buttons row
-        snooze_layout = QHBoxLayout()
-        snooze_layout.setSpacing(8)
+        snooze_row = QHBoxLayout()
+        snooze_row.setSpacing(8)
+        for label, secs in [("+5m", 300), ("+15m", 900), ("+30m", 1800), ("+1h", 3600)]:
+            b = QPushButton(label)
+            b.setObjectName("SnoozeBtn")
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _, s=secs: self._snooze(s))
+            snooze_row.addWidget(b)
+        lay.addLayout(snooze_row)
 
-        for text_key, secs in [
-            ("btn_snooze_5m", 300),
-            ("btn_snooze_15m", 900),
-            ("btn_snooze_30m", 1800),
-            ("btn_snooze_1h", 3600)
-        ]:
-            btn = QPushButton(tr(text_key, lang))
-            btn.setObjectName("SnoozeButton")
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(lambda _, s=secs: self._on_snooze_clicked(s))
-            snooze_layout.addWidget(btn)
+        outer.addWidget(card)
 
-        card_layout.addLayout(snooze_layout)
-        main_layout.addWidget(self.card)
-
-    def update_tick(self, remaining_sec: int):
-        """Update digits on countdown tick."""
-        self.remaining_sec = remaining_sec
-        self.digits_label.setText(str(remaining_sec))
-        if remaining_sec <= 0:
+    def update_tick(self, remaining: int):
+        self.digits_label.setText(str(remaining))
+        if remaining <= 0:
             self.accept()
 
-    def _on_abort_clicked(self):
-        """Cancel the countdown and close dialog."""
-        if self.engine:
-            self.engine.cancel_countdown("User pressed Abort button in Warning Dialog")
+    def _abort(self):
+        self.cancelled.emit()
         self.reject()
 
-    def _on_snooze_clicked(self, seconds: int):
-        """Snooze countdown."""
-        if self.engine:
-            self.engine.snooze(seconds)
+    def _snooze(self, secs: int):
+        self.snoozed.emit(secs)
         self.reject()
 
-    # Window dragging
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
             self.dragging = True
-            self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+            self.drag_position = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
 
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.dragging = False
-            event.accept()
+    def mouseReleaseEvent(self, _):
+        self.dragging = False
 
-    def mouseMoveEvent(self, event):
-        if self.dragging and event.buttons() & Qt.LeftButton:
-            self.move(event.globalPosition().toPoint() - self.drag_position)
-            event.accept()
+    def mouseMoveEvent(self, e):
+        if self.dragging and e.buttons() & Qt.LeftButton:
+            self.move(e.globalPosition().toPoint() - self.drag_position)

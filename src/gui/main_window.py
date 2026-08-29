@@ -1,7 +1,6 @@
 """
 NightByte AI - Master GUI Main Window
-Clean, modern, human-crafted interface with interactive platform chips,
-smooth speed curve, granular game targeting, and zero visual clutter.
+Inverted monochrome dark. English-only. Zero clutter. Bold minimalist design.
 """
 
 import os
@@ -9,28 +8,54 @@ import sys
 import webbrowser
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QComboBox, QFrame, QScrollArea, QListWidget, QListWidgetItem, QTabWidget,
-    QRadioButton, QApplication
+    QComboBox, QFrame, QScrollArea, QListWidget, QListWidgetItem,
+    QTabWidget, QRadioButton, QApplication
 )
-from PySide6.QtCore import Qt, QPoint, Signal, QTimer
-from PySide6.QtGui import QIcon, QColor, QFont, QPixmap
+from PySide6.QtCore import Qt, QPoint, QTimer
+from PySide6.QtGui import QIcon, QFont
 
-from i18n.translations import tr
+from i18n.translations import t
 from utils.config import ConfigManager
 from utils.logger import logger
 from utils.updater import UpdateChecker, CURRENT_VERSION
 from core.monitor_engine import MonitorEngine, MonitorState
-from gui.widgets.speed_graph import LiveSpeedGraph
+from gui.widgets.speed_graph import SpeedGraph
 from gui.widgets.download_card import DownloadCard
 from gui.widgets.platform_chip import PlatformChip
 from gui.countdown_dialog import CountdownWarningDialog
 from gui.settings_dialog import SettingsScreen
 from gui.tray_manager import TrayManager
-from themes.theme_manager import ThemeManager
+
+
+def _h(spacing: int = 0, margins=(0, 0, 0, 0)) -> QHBoxLayout:
+    lay = QHBoxLayout()
+    lay.setSpacing(spacing)
+    lay.setContentsMargins(*margins)
+    return lay
+
+
+def _v(spacing: int = 0, margins=(0, 0, 0, 0)) -> QVBoxLayout:
+    lay = QVBoxLayout()
+    lay.setSpacing(spacing)
+    lay.setContentsMargins(*margins)
+    return lay
+
+
+def _lbl(text: str, obj_name: str = "", font_size: int = 0, bold: bool = False) -> QLabel:
+    lb = QLabel(text)
+    if obj_name:
+        lb.setObjectName(obj_name)
+    if font_size or bold:
+        f = lb.font()
+        if font_size:
+            f.setPointSize(font_size)
+        if bold:
+            f.setWeight(QFont.ExtraBold)
+        lb.setFont(f)
+    return lb
 
 
 class MainWindow(QWidget):
-    """The master application window."""
 
     def __init__(self):
         super().__init__()
@@ -39,611 +64,510 @@ class MainWindow(QWidget):
         self.updater = UpdateChecker(self)
         self.countdown_dialog = None
         self.latest_update_url = ""
-        self.active_cards = {}
+        self.active_cards: dict[str, DownloadCard] = {}
 
-        # Frameless sleek window
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
-        self.resize(720, 620)
+        self.resize(740, 620)
         self.setMinimumSize(640, 520)
-
         self.dragging = False
         self.drag_position = QPoint()
 
-        # Build UI
-        self.setup_ui()
-        self.apply_language_and_direction()
+        self._build_ui()
 
-        # System Tray
-        app_icon = self._get_app_icon()
-        self.setWindowIcon(app_icon)
-        self.tray = TrayManager(app_icon, self)
-        self._connect_tray_signals()
-        self.tray.show()
+        icon = self._get_app_icon()
+        self.setWindowIcon(icon)
+        self.tray = TrayManager(icon, self)
+        self._connect_tray()
+        self._connect_engine()
 
-        # Connect Signals
-        self.engine.stats_updated.connect(self._on_stats_updated)
-        self.engine.countdown_started.connect(self._on_countdown_started)
-        self.engine.countdown_tick.connect(self._on_countdown_tick)
-        self.engine.countdown_aborted.connect(self._on_countdown_aborted)
-        self.engine.action_executed.connect(self._on_action_executed)
-
-        # Connect Updater
+        # Update checker
         self.updater.update_available.connect(self._on_update_available)
         if self.config.get("auto_check_updates", True):
-            QTimer.singleShot(2500, self.updater.check_for_updates_async)
-
-        # Connect Logger
-        logger.log_added.connect(self._on_log_added)
-        for t, lvl, msg in logger.history:
-            self._on_log_added(t, lvl, msg)
+            QTimer.singleShot(3000, lambda: self.updater.check_async())
 
     def _get_app_icon(self) -> QIcon:
-        base_dir = getattr(sys, "_MEIPASS", os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
-        icon_path = os.path.join(base_dir, "assets", "app_icon.png")
-        if os.path.exists(icon_path):
-            return QIcon(icon_path)
-        ico_path = os.path.join(base_dir, "assets", "app_icon.ico")
-        if os.path.exists(ico_path):
-            return QIcon(ico_path)
-        pix = QPixmap(64, 64)
-        pix.fill(QColor("#2563eb"))
-        return QIcon(pix)
+        for base in [
+            os.path.dirname(os.path.abspath(sys.argv[0])),
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            os.path.dirname(os.path.abspath(__file__)),
+            "."
+        ]:
+            ico = os.path.join(base, "assets", "app_icon.ico")
+            if os.path.exists(ico):
+                return QIcon(ico)
+        return QIcon()
 
-    def setup_ui(self):
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+    def _build_ui(self):
+        root = _v(0, (0, 0, 0, 0))
+        root.addWidget(self._make_titlebar())
+        root.addWidget(self._make_update_banner())
+        root.addWidget(self._make_tabs(), 1)
+        root.addWidget(self._make_statusbar())
+        self.setLayout(root)
 
-        # 1. Fixed Title Bar (Forces LeftToRight so control buttons are always pinned on the top-right)
-        self.title_bar = self._create_title_bar()
-        main_layout.addWidget(self.title_bar)
+    # ── Title Bar ─────────────────────────────────────────────────────────────
 
-        # 2. Update Notification Banner
-        self.update_banner = QPushButton()
-        self.update_banner.setObjectName("UpdateBanner")
-        self.update_banner.setCursor(Qt.PointingHandCursor)
-        self.update_banner.clicked.connect(self._open_update_link)
-        self.update_banner.hide()
-        main_layout.addWidget(self.update_banner)
+    def _make_titlebar(self) -> QWidget:
+        bar = QWidget()
+        bar.setObjectName("TitleBar")
+        bar.setFixedHeight(44)
+        lay = _h(0, (14, 0, 10, 0))
 
-        # 3. Main Body Container
-        self.content_container = QWidget()
-        content_layout = QVBoxLayout(self.content_container)
-        content_layout.setContentsMargins(14, 10, 14, 14)
-        content_layout.setSpacing(8)
+        title = _lbl("NightByte", "AppTitle")
+        ver = _lbl(f"  v{CURRENT_VERSION}", "VersionLabel")
 
-        self.nav_tabs = QTabWidget()
-        self.nav_tabs.setObjectName("MainTabs")
+        lay.addWidget(title)
+        lay.addWidget(ver)
+        lay.addStretch()
 
-        # Tabs
-        self.dashboard_tab = self._create_dashboard_tab()
-        self.nav_tabs.addTab(self.dashboard_tab, "Dashboard")
+        # Settings shortcut in titlebar
+        self.settings_btn = QPushButton("Settings")
+        self.settings_btn.setObjectName("TitleButton")
+        self.settings_btn.setCursor(Qt.PointingHandCursor)
+        self.settings_btn.clicked.connect(self._open_settings)
+        lay.addWidget(self.settings_btn)
+        lay.addSpacing(6)
 
-        self.downloads_tab = self._create_downloads_tab()
-        self.nav_tabs.addTab(self.downloads_tab, "Downloads")
-
-        self.logs_tab = self._create_logs_tab()
-        self.nav_tabs.addTab(self.logs_tab, "Live Log")
-
-        self.settings_screen = SettingsScreen()
-        self.settings_screen.settings_saved.connect(self._on_settings_saved)
-        self.nav_tabs.addTab(self.settings_screen, "Settings")
-
-        content_layout.addWidget(self.nav_tabs)
-        main_layout.addWidget(self.content_container)
-
-    def _create_title_bar(self) -> QWidget:
-        title_bar = QWidget()
-        title_bar.setObjectName("TitleBar")
-        title_bar.setLayoutDirection(Qt.LeftToRight)  # Always keep clean window controls on the right
-        
-        layout = QHBoxLayout(title_bar)
-        layout.setContentsMargins(14, 0, 8, 0)
-        layout.setSpacing(8)
-
-        # App Logo & Title
-        title_layout = QHBoxLayout()
-        title_layout.setSpacing(6)
-        
-        self.title_label = QLabel("⚡ NightByte")
-        self.title_label.setObjectName("AppTitle")
-        title_layout.addWidget(self.title_label)
-
-        self.version_tag = QLabel(f"v{CURRENT_VERSION}")
-        self.version_tag.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 600;")
-        title_layout.addWidget(self.version_tag)
-
-        layout.addLayout(title_layout)
-        layout.addStretch()
-
-        # Language Toggle Pill
-        self.lang_btn = QPushButton("🌐 العربية")
-        self.lang_btn.setObjectName("TitleButton")
-        self.lang_btn.setCursor(Qt.PointingHandCursor)
-        self.lang_btn.clicked.connect(self._toggle_language)
-        layout.addWidget(self.lang_btn)
-
-        # Minimize Button
-        min_btn = QPushButton("─")
+        # Window controls
+        min_btn = QPushButton("—")
         min_btn.setObjectName("TitleButton")
         min_btn.setCursor(Qt.PointingHandCursor)
         min_btn.clicked.connect(self.showMinimized)
-        layout.addWidget(min_btn)
+        lay.addWidget(min_btn)
 
-        # Close Button
         close_btn = QPushButton("✕")
         close_btn.setObjectName("CloseTitleButton")
         close_btn.setCursor(Qt.PointingHandCursor)
-        close_btn.clicked.connect(self._handle_close_button)
-        layout.addWidget(close_btn)
+        close_btn.clicked.connect(self._close_or_tray)
+        lay.addWidget(close_btn)
 
-        return title_bar
+        bar.setLayout(lay)
+        bar.setLayoutDirection(Qt.LeftToRight)
+        return bar
 
-    def _create_dashboard_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(10)
+    # ── Update Banner ─────────────────────────────────────────────────────────
 
-        # 1. Clean Hero Surface Card
-        hero_card = QFrame()
-        hero_card.setObjectName("HeroCard")
-        hero_layout = QVBoxLayout(hero_card)
-        hero_layout.setContentsMargins(16, 14, 16, 14)
-        hero_layout.setSpacing(12)
+    def _make_update_banner(self) -> QPushButton:
+        self.update_banner = QPushButton("")
+        self.update_banner.setObjectName("UpdateBanner")
+        self.update_banner.setFixedHeight(36)
+        self.update_banner.hide()
+        self.update_banner.setCursor(Qt.PointingHandCursor)
+        self.update_banner.clicked.connect(
+            lambda: webbrowser.open(self.latest_update_url)
+        )
+        return self.update_banner
 
-        # Top Speed Gauge & Internet Pill
-        top_row = QHBoxLayout()
-        
-        speed_box = QHBoxLayout()
-        speed_box.setSpacing(6)
-        self.hero_speed_val = QLabel("0.0")
-        self.hero_speed_val.setObjectName("HeroSpeed")
-        speed_box.addWidget(self.hero_speed_val)
+    # ── Tabs ──────────────────────────────────────────────────────────────────
 
-        self.hero_speed_unit = QLabel("KB/s")
-        self.hero_speed_unit.setObjectName("HeroSpeedUnit")
-        speed_box.addWidget(self.hero_speed_unit)
-        top_row.addLayout(speed_box)
+    def _make_tabs(self) -> QTabWidget:
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        self.tabs.addTab(self._tab_dashboard(), "  Dashboard  ")
+        self.tabs.addTab(self._tab_downloads(), "  Downloads  ")
+        self.tabs.addTab(self._tab_log(), "  Live Log  ")
+        self.tabs.addTab(self._make_settings_tab(), "  Settings  ")
+        return self.tabs
 
-        top_row.addStretch()
+    # ── Dashboard Tab ─────────────────────────────────────────────────────────
 
-        # Clean Internet Status Badge
-        self.net_badge = QLabel("● Online")
-        self.net_badge.setStyleSheet("background: rgba(16, 185, 129, 0.12); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 4px 10px; font-weight: 700; font-size: 11px;")
-        top_row.addWidget(self.net_badge)
-        hero_layout.addLayout(top_row)
+    def _tab_dashboard(self) -> QWidget:
+        w = QWidget()
+        lay = _v(12, (16, 16, 16, 16))
 
-        # Master Start / Stop Button
-        self.power_btn = QPushButton("▶️ Start Smart Monitoring")
+        # Speed Hero Row
+        hero_row = _h(0)
+        speed_col = _h(8)
+
+        self.speed_value = _lbl("0", "HeroSpeed")
+        self.speed_unit = _lbl("KB/s", "HeroSpeedUnit")
+
+        f = self.speed_value.font()
+        f.setPointSize(44)
+        f.setWeight(QFont.Black)
+        self.speed_value.setFont(f)
+
+        speed_col.addWidget(self.speed_value)
+        speed_col.setAlignment(self.speed_value, Qt.AlignBottom)
+        speed_col.addWidget(self.speed_unit)
+        speed_col.setAlignment(self.speed_unit, Qt.AlignBottom)
+        speed_col.addStretch()
+
+        hero_row.addLayout(speed_col)
+        hero_row.addStretch()
+
+        self.net_badge = QPushButton("● Online")
+        self.net_badge.setObjectName("NetBadgeOnline")
+        self.net_badge.setEnabled(False)
+        hero_row.addWidget(self.net_badge)
+
+        lay.addLayout(hero_row)
+
+        # Start / Stop Button
+        self.power_btn = QPushButton(t("btn_start"))
         self.power_btn.setObjectName("MasterPowerBtn")
+        self.power_btn.setFixedHeight(48)
         self.power_btn.setCursor(Qt.PointingHandCursor)
         self.power_btn.clicked.connect(self._toggle_monitoring)
-        hero_layout.addWidget(self.power_btn)
+        lay.addWidget(self.power_btn)
 
-        layout.addWidget(hero_card)
+        # Platform Chips Row
+        plat_frame = QFrame()
+        plat_frame.setObjectName("PlatformFrame")
+        plat_lay = _h(8, (12, 10, 12, 10))
 
-        # 2. Modern Interactive Platform Chips (Toggle Pills!)
-        plat_card = QFrame()
-        plat_card.setStyleSheet("background-color: #111827; border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 10px; padding: 6px;")
-        plat_layout = QHBoxLayout(plat_card)
-        plat_layout.setContentsMargins(8, 4, 8, 4)
-        plat_layout.setSpacing(8)
+        plat_label = _lbl("Platforms:", "PlatformLabel")
+        plat_lay.addWidget(plat_label)
+        plat_lay.addSpacing(4)
 
-        self.plat_label = QLabel("Monitored Platforms:")
-        self.plat_label.setStyleSheet("color: #64748b; font-weight: 700; font-size: 11px;")
-        plat_layout.addWidget(self.plat_label)
+        self.platform_chips: dict[str, PlatformChip] = {}
+        chip_defs = [
+            ("steam", "Steam", "monitor_steam"),
+            ("epic", "Epic", "monitor_epic"),
+            ("torrent", "Torrent", "monitor_torrents"),
+            ("ea_bnet", "EA / BN", "monitor_ea"),
+            ("idm", "IDM", "monitor_idm_browsers"),
+        ]
+        for key, label, cfg_key in chip_defs:
+            active_val = self.config.get(cfg_key, True)
+            chip = PlatformChip(label, key, active=active_val)
+            chip.toggled_platform.connect(self._on_platform_toggle)
+            self.platform_chips[key] = chip
+            plat_lay.addWidget(chip)
 
-        self.chip_steam = PlatformChip("steam", "Steam", is_active=True)
-        self.chip_steam.toggled_platform.connect(self.engine.set_platform_enabled)
-        plat_layout.addWidget(self.chip_steam)
+        plat_lay.addStretch()
+        plat_frame.setLayout(plat_lay)
+        lay.addWidget(plat_frame)
 
-        self.chip_epic = PlatformChip("epic", "Epic Games", is_active=True)
-        self.chip_epic.toggled_platform.connect(self.engine.set_platform_enabled)
-        plat_layout.addWidget(self.chip_epic)
+        # Speed Graph
+        self.graph = SpeedGraph()
+        lay.addWidget(self.graph, 1)
 
-        self.chip_torrent = PlatformChip("torrent", "Torrent", is_active=True)
-        self.chip_torrent.toggled_platform.connect(self.engine.set_platform_enabled)
-        plat_layout.addWidget(self.chip_torrent)
-
-        self.chip_ea = PlatformChip("ea_bnet", "EA / Battle.net", is_active=True)
-        self.chip_ea.toggled_platform.connect(self.engine.set_platform_enabled)
-        plat_layout.addWidget(self.chip_ea)
-
-        self.chip_idm = PlatformChip("idm", "IDM / Browsers", is_active=True)
-        self.chip_idm.toggled_platform.connect(self.engine.set_platform_enabled)
-        plat_layout.addWidget(self.chip_idm)
-
-        layout.addWidget(plat_card)
-
-        # 3. Waveform Speed Graph
-        self.speed_graph = LiveSpeedGraph()
-        layout.addWidget(self.speed_graph)
-
-        # 4. Action Selector Row
-        action_bar = QHBoxLayout()
-        action_bar.setSpacing(8)
-
-        self.action_label = QLabel("When finished:")
-        self.action_label.setStyleSheet("color: #94a3b8; font-weight: 700; font-size: 12px;")
-        action_bar.addWidget(self.action_label)
+        # Action Selector Row
+        action_row = _h(12)
+        action_label = _lbl(t("label_when_done"), "ActionLabel")
+        action_row.addWidget(action_label)
+        action_row.addStretch()
 
         self.action_combo = QComboBox()
-        self.action_combo.setObjectName("ActionCombo")
-        self._populate_actions_combo()
+        actions = [
+            ("shutdown", t("action_shutdown")),
+            ("sleep", t("action_sleep")),
+            ("hibernate", t("action_hibernate")),
+            ("restart", t("action_restart")),
+            ("lock", t("action_lock")),
+            ("logoff", t("action_logoff")),
+            ("close_launchers", t("action_close_launchers")),
+            ("monitors_off", t("action_monitors_off")),
+        ]
+        for key, lbl in actions:
+            self.action_combo.addItem(lbl, key)
+
+        saved_action = self.config.get("default_action", "shutdown")
+        for i in range(self.action_combo.count()):
+            if self.action_combo.itemData(i) == saved_action:
+                self.action_combo.setCurrentIndex(i)
+                break
+
+        self.action_combo.setFixedWidth(210)
         self.action_combo.currentIndexChanged.connect(self._on_action_changed)
-        action_bar.addWidget(self.action_combo, stretch=1)
+        action_row.addWidget(self.action_combo)
+        lay.addLayout(action_row)
 
-        layout.addLayout(action_bar)
+        w.setLayout(lay)
+        return w
 
-        # 5. Status Banner
-        self.status_banner = QFrame()
-        self.status_banner.setObjectName("StatusBanner")
-        banner_layout = QHBoxLayout(self.status_banner)
-        banner_layout.setContentsMargins(12, 6, 12, 6)
+    # ── Downloads Tab ─────────────────────────────────────────────────────────
 
-        self.status_icon = QLabel("💡")
-        banner_layout.addWidget(self.status_icon)
+    def _tab_downloads(self) -> QWidget:
+        w = QWidget()
+        lay = _v(12, (16, 16, 16, 16))
 
-        self.status_text = QLabel("Ready - Click Start to begin monitoring")
-        self.status_text.setObjectName("StatusText")
-        banner_layout.addWidget(self.status_text, stretch=1)
+        # Target mode
+        mode_frame = QFrame()
+        mode_frame.setObjectName("ModeFrame")
+        ml = _h(14, (14, 10, 14, 10))
+        lbl = _lbl(t("target_mode_label"), "ActionLabel")
+        ml.addWidget(lbl)
+        ml.addSpacing(6)
 
-        layout.addWidget(self.status_banner)
-        return widget
+        self.mode_all_radio = QRadioButton(t("target_all"))
+        self.mode_sel_radio = QRadioButton(t("target_selected"))
+        self.mode_all_radio.setChecked(True)
+        self.mode_all_radio.toggled.connect(
+            lambda checked: self.engine.set_target_mode("all" if checked else "selected")
+        )
+        ml.addWidget(self.mode_all_radio)
+        ml.addWidget(self.mode_sel_radio)
+        ml.addStretch()
+        mode_frame.setLayout(ml)
+        lay.addWidget(mode_frame)
 
-    def _create_downloads_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(8)
+        # Card scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.NoFrame)
 
-        # Target Mode Segmented Card
-        mode_card = QFrame()
-        mode_card.setStyleSheet("background-color: #111827; border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 10px; padding: 6px;")
-        mode_layout = QHBoxLayout(mode_card)
-        mode_layout.setContentsMargins(10, 4, 10, 4)
-        mode_layout.setSpacing(12)
+        self.cards_container = QWidget()
+        self.cards_layout = _v(8)
+        self.cards_layout.setAlignment(Qt.AlignTop)
 
-        self.mode_label = QLabel("🎯 Target Mode:")
-        self.mode_label.setStyleSheet("color: #38bdf8; font-weight: 700; font-size: 11px;")
-        mode_layout.addWidget(self.mode_label)
+        self.empty_lbl = _lbl(t("no_downloads"), "StatusText")
+        self.empty_lbl.setWordWrap(True)
+        self.empty_lbl.setAlignment(Qt.AlignCenter)
+        self.cards_layout.addWidget(self.empty_lbl)
 
-        self.radio_mode_all = QRadioButton("All downloads in active platforms")
-        self.radio_mode_all.setChecked(True)
-        self.radio_mode_all.toggled.connect(self._on_target_mode_toggled)
-        mode_layout.addWidget(self.radio_mode_all)
+        self.cards_container.setLayout(self.cards_layout)
+        scroll.setWidget(self.cards_container)
+        lay.addWidget(scroll, 1)
+        w.setLayout(lay)
+        return w
 
-        self.radio_mode_selected = QRadioButton("Only checked games (✓)")
-        self.radio_mode_selected.toggled.connect(self._on_target_mode_toggled)
-        mode_layout.addWidget(self.radio_mode_selected)
+    # ── Live Log Tab ──────────────────────────────────────────────────────────
 
-        mode_layout.addStretch()
-        layout.addWidget(mode_card)
+    def _tab_log(self) -> QWidget:
+        w = QWidget()
+        lay = _v(10, (16, 16, 16, 16))
 
-        # Scroll Area for active cards
-        self.downloads_scroll = QScrollArea()
-        self.downloads_scroll.setWidgetResizable(True)
-
-        self.downloads_container = QWidget()
-        self.downloads_layout = QVBoxLayout(self.downloads_container)
-        self.downloads_layout.setContentsMargins(4, 4, 4, 4)
-        self.downloads_layout.setSpacing(6)
-        self.downloads_layout.setAlignment(Qt.AlignTop)
-
-        self.empty_label = QLabel("No active downloads detected.\n(Start downloading any game in Steam, Epic, or Torrent, and it will appear here automatically)")
-        self.empty_label.setAlignment(Qt.AlignCenter)
-        self.empty_label.setStyleSheet("color: #64748b; font-size: 13px; margin-top: 40px;")
-        self.downloads_layout.addWidget(self.empty_label)
-
-        self.downloads_scroll.setWidget(self.downloads_container)
-        layout.addWidget(self.downloads_scroll)
-        return widget
-
-    def _create_logs_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(6, 6, 6, 6)
-        layout.setSpacing(8)
-
-        guide_banner = QFrame()
-        guide_banner.setStyleSheet("background-color: #111827; border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 10px; padding: 8px 12px;")
-        guide_layout = QHBoxLayout(guide_banner)
-        
-        self.guide_text = QLabel("📖 <b>Live Activity Feed:</b> Explains every engine step in clear language (network status, game detection, timers, and awake locks).")
-        self.guide_text.setWordWrap(True)
-        self.guide_text.setStyleSheet("color: #94a3b8; font-size: 11px;")
-        guide_layout.addWidget(self.guide_text)
-        layout.addWidget(guide_banner)
+        header = _h(0)
+        header.addWidget(_lbl("Live Activity Log", "ActionLabel"))
+        header.addStretch()
+        clr = QPushButton(t("btn_clear_logs"))
+        clr.setObjectName("SecondaryButton")
+        clr.setCursor(Qt.PointingHandCursor)
+        clr.clicked.connect(lambda: self.log_list.clear())
+        header.addWidget(clr)
+        lay.addLayout(header)
 
         self.log_list = QListWidget()
         self.log_list.setObjectName("LogList")
-        layout.addWidget(self.log_list)
+        lay.addWidget(self.log_list, 1)
+        w.setLayout(lay)
+        return w
 
-        btn_bar = QHBoxLayout()
-        btn_bar.addStretch()
-        self.clear_logs_btn = QPushButton("🗑️ Clear Log")
-        self.clear_logs_btn.setObjectName("SecondaryButton")
-        self.clear_logs_btn.clicked.connect(self.log_list.clear)
-        btn_bar.addWidget(self.clear_logs_btn)
-        layout.addLayout(btn_bar)
+    # ── Settings Tab ──────────────────────────────────────────────────────────
 
-        return widget
+    def _make_settings_tab(self) -> QWidget:
+        container = QWidget()
+        lay = _v(0, (0, 0, 0, 0))
+        self._settings_screen = SettingsScreen(self.config, parent=container)
+        lay.addWidget(self._settings_screen)
+        container.setLayout(lay)
+        return container
 
-    def _on_target_mode_toggled(self):
-        if self.radio_mode_selected.isChecked():
-            self.engine.set_target_mode("selected")
-        else:
-            self.engine.set_target_mode("all")
+    # ── Status Bar ────────────────────────────────────────────────────────────
 
-    def _populate_actions_combo(self):
-        lang = self.config.get("language", "ar")
-        self.action_combo.blockSignals(True)
-        self.action_combo.clear()
+    def _make_statusbar(self) -> QWidget:
+        bar = QWidget()
+        bar.setObjectName("StatusBar")
+        lay = _h(0, (14, 0, 14, 0))
+        self.status_lbl = _lbl("💡  " + t("status_idle"), "StatusText")
+        lay.addWidget(self.status_lbl)
+        lay.addStretch()
+        bar.setLayout(lay)
+        return bar
 
-        actions = [
-            ("action_shutdown", "shutdown"),
-            ("action_sleep", "sleep"),
-            ("action_hibernate", "hibernate"),
-            ("action_restart", "restart"),
-            ("action_lock", "lock"),
-            ("action_logoff", "logoff"),
-            ("action_close_launchers", "close_launchers"),
-            ("action_monitors_off", "monitors_off"),
-        ]
+    # ── Connections ───────────────────────────────────────────────────────────
 
-        curr_act = self.config.get("default_action", "shutdown")
-        select_idx = 0
-        for i, (key, val) in enumerate(actions):
-            self.action_combo.addItem(tr(key, lang), val)
-            if val == curr_act:
-                select_idx = i
+    def _connect_engine(self):
+        e = self.engine
+        e.stats_updated.connect(self._on_stats_updated)
+        e.countdown_started.connect(self._on_countdown_start)
+        e.countdown_tick.connect(self._on_countdown_tick)
+        e.countdown_aborted.connect(self._on_countdown_aborted)
+        e.action_executed.connect(self._on_action_executed)
 
-        self.action_combo.setCurrentIndex(select_idx)
-        self.action_combo.blockSignals(False)
+    def _connect_tray(self):
+        t_ = self.tray
+        t_.show_requested.connect(self.show_window)
+        t_.toggle_requested.connect(self._toggle_monitoring)
+        t_.cancel_requested.connect(lambda: self.engine.cancel_countdown("Cancelled from tray"))
+        t_.exit_requested.connect(self._exit_app)
 
-    def _on_action_changed(self, index: int):
-        action_val = self.action_combo.currentData()
-        if action_val:
-            self.config.set("default_action", action_val)
-            logger.info(f"Action updated to: {action_val}")
+    # ── Event Handlers ────────────────────────────────────────────────────────
 
     def _toggle_monitoring(self):
         if self.engine.is_enabled:
             self.engine.stop_monitoring()
         else:
+            action = self.action_combo.currentData() or "shutdown"
+            self.config.set("default_action", action)
             self.engine.start_monitoring()
-        self._update_power_button_ui()
 
-    def _update_power_button_ui(self):
-        lang = self.config.get("language", "ar")
-        if self.engine.is_enabled:
-            self.power_btn.setText(f"⏸️ {tr('btn_disable', lang)}")
-            self.power_btn.setProperty("active", "true")
-        else:
-            self.power_btn.setText(f"▶️ {tr('btn_enable', lang)}")
-            self.power_btn.setProperty("active", "false")
-        self.power_btn.style().unpolish(self.power_btn)
-        self.power_btn.style().polish(self.power_btn)
-
-    def _toggle_language(self):
-        cur = self.config.get("language", "ar")
-        new_lang = "en" if cur == "ar" else "ar"
-        self.config.set("language", new_lang)
-        self.apply_language_and_direction()
-
-    def apply_language_and_direction(self):
-        lang = self.config.get("language", "ar")
-        is_rtl = (lang == "ar")
-        
-        # Apply layout direction ONLY to inner tabs/content, keeping title bar layout cleanly pinned
-        self.content_container.setLayoutDirection(Qt.RightToLeft if is_rtl else Qt.LeftToRight)
-
-        self.lang_btn.setText("العربية" if lang == "en" else "English")
-        self.title_label.setText(tr("app_name", lang))
-
-        self.nav_tabs.setTabText(0, f"📊 {tr('tab_dashboard', lang)}")
-        self.nav_tabs.setTabText(1, f"🎮 {tr('tab_downloads', lang)}")
-        self.nav_tabs.setTabText(2, f"📜 {tr('tab_logs', lang)}")
-        self.nav_tabs.setTabText(3, f"⚙️ {tr('tab_settings', lang)}")
-
-        self._update_power_button_ui()
-        self.action_label.setText(tr("label_select_action", lang))
-        self._populate_actions_combo()
-        self.clear_logs_btn.setText(f"🗑️ {tr('btn_clear_logs', lang)}")
-        self.empty_label.setText(tr("no_active_downloads", lang))
-        
-        if is_rtl:
-            self.plat_label.setText("المنصات:")
-            self.mode_label.setText("🎯 وضع الهدف:")
-            self.radio_mode_all.setText("كل التحميلات في المنصات المحددة")
-            self.radio_mode_selected.setText("فقط الألعاب / الملفات المحددة (✓)")
-            self.guide_text.setText("📖 <b>سجل النشاط المباشر:</b> يشرح باللغة البسيطة كل خطوة يقوم بها البرنامج لحظة بلحظة (فحص النت، كشف الألعاب، مؤقتات الإيقاف، وحماية تفاعل المستخدم).")
-        else:
-            self.plat_label.setText("Platforms:")
-            self.mode_label.setText("🎯 Target Mode:")
-            self.radio_mode_all.setText("All downloads in active platforms")
-            self.radio_mode_selected.setText("Only checked games (✓)")
-            self.guide_text.setText("📖 <b>Live Activity Feed:</b> Explains every engine step in clear language (network status, game detection, timers, and awake locks).")
-
-        self.settings_screen.setup_ui()
-        self.settings_screen.load_values()
+    def _on_action_changed(self):
+        action = self.action_combo.currentData() or "shutdown"
+        self.config.set("default_action", action)
 
     def _on_stats_updated(self, snapshot: dict):
-        lang = self.config.get("language", "ar")
-        speed_kb = snapshot["download_speed_kb"]
-        is_online = snapshot["is_online"]
-        ping = snapshot["ping_ms"]
-        active_items = snapshot["active_items"]
+        is_running = snapshot.get("is_enabled", False)
+        state = snapshot.get("state", MonitorState.IDLE)
+        msg = snapshot.get("status_message", "Ready")
+        speed_kb = snapshot.get("download_speed_kb", 0.0)
+        is_online = snapshot.get("is_online", True)
+        active_items = snapshot.get("active_items", [])
 
-        # Hero Speed Typography
+        # Update button state
+        self.power_btn.setProperty("active", str(is_running).lower())
+        self.power_btn.style().unpolish(self.power_btn)
+        self.power_btn.style().polish(self.power_btn)
+        self.power_btn.setText(t("btn_stop") if is_running else t("btn_start"))
+
+        # Update speed metrics
         if speed_kb >= 1024.0:
-            self.hero_speed_val.setText(f"{speed_kb / 1024.0:.1f}")
-            self.hero_speed_unit.setText("MB/s")
+            self.speed_value.setText(f"{speed_kb / 1024.0:.1f}")
+            self.speed_unit.setText("MB/s")
         else:
-            self.hero_speed_val.setText(f"{speed_kb:.0f}")
-            self.hero_speed_unit.setText("KB/s")
+            self.speed_value.setText(f"{speed_kb:.0f}")
+            self.speed_unit.setText("KB/s")
 
-        # Internet Badge
+        self.graph.add_point(speed_kb)
+
+        # Update network status badge
         if is_online:
-            self.net_badge.setText(f"● {tr('net_online', lang)} ({ping:.0f}ms)")
-            self.net_badge.setStyleSheet("background: rgba(16, 185, 129, 0.12); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 4px 10px; font-weight: 700; font-size: 11px;")
+            self.net_badge.setText("● Online")
+            self.net_badge.setObjectName("NetBadgeOnline")
         else:
-            off_sec = snapshot["offline_duration_sec"]
-            self.net_badge.setText(f"● {tr('net_offline', lang)} ({off_sec}s)")
-            self.net_badge.setStyleSheet("background: rgba(239, 68, 68, 0.18); color: #ef4444; border: 1px solid #ef4444; border-radius: 6px; padding: 4px 10px; font-weight: 700; font-size: 11px;")
+            self.net_badge.setText("● Offline")
+            self.net_badge.setObjectName("NetBadgeOffline")
+        self.net_badge.style().unpolish(self.net_badge)
+        self.net_badge.style().polish(self.net_badge)
 
-        # Speed Graph
-        self.speed_graph.update_history(snapshot["speed_history"], speed_kb, snapshot["peak_speed_kb"])
+        # Update status bar text
+        if state == MonitorState.COUNTDOWN:
+            self.status_lbl.setText(f"⚠️  {msg}")
+            self.status_lbl.setObjectName("StatusTextWarning")
+        elif is_running:
+            self.status_lbl.setText(f"👁  {msg}")
+            self.status_lbl.setObjectName("StatusTextActive")
+        else:
+            self.status_lbl.setText(f"💡  {msg}")
+            self.status_lbl.setObjectName("StatusText")
 
-        # Status Banner
-        self._update_status_banner(snapshot["state"], snapshot["status_message"], lang)
+        self.status_lbl.style().unpolish(self.status_lbl)
+        self.status_lbl.style().polish(self.status_lbl)
 
-        # Download Cards
+        # Update tray status
+        self.tray.update_status(msg, running=is_running)
+        self.tray.set_countdown_active(state == MonitorState.COUNTDOWN)
+
+        # Update download cards
         self._update_download_cards(active_items)
 
-        # Tray
-        self.tray.update_status(snapshot["is_enabled"], speed_kb, is_online, snapshot["status_message"])
+        # Log item if state transition or meaningful message
+        if is_running and state in (MonitorState.COUNTDOWN, MonitorState.PAUSED_NET_DROP, MonitorState.PAUSED_AFK):
+            self._log_feed(f"[{state}] {msg}")
 
-    def _update_status_banner(self, state: str, message: str, lang: str):
-        if state == MonitorState.IDLE:
-            self.status_icon.setText("⏸️")
-            self.status_text.setText(tr("status_idle", lang))
-            self.status_text.setStyleSheet("color: #94a3b8;")
-        elif state == MonitorState.ACTIVE_DOWNLOADING:
-            self.status_icon.setText("🚀")
-            self.status_text.setText(f"{tr('status_downloading', lang)} ({message})")
-            self.status_text.setStyleSheet("color: #38bdf8;")
-        elif state == MonitorState.BELOW_THRESHOLD:
-            self.status_icon.setText("⏳")
-            self.status_text.setText(f"{tr('status_below_threshold', lang)} - {message}")
-            self.status_text.setStyleSheet("color: #f59e0b;")
-        elif state == MonitorState.PAUSED_NET_DROP:
-            self.status_icon.setText("⚠️")
-            self.status_text.setText(f"{tr('status_paused_network', lang)}")
-            self.status_text.setStyleSheet("color: #ef4444; font-weight: bold;")
-        elif state == MonitorState.PAUSED_AFK:
-            self.status_icon.setText("🛡️")
-            self.status_text.setText(tr("status_paused_afk", lang))
-            self.status_text.setStyleSheet("color: #a855f7;")
-        elif state == MonitorState.COUNTDOWN:
-            self.status_icon.setText("🚨")
-            self.status_text.setText(tr("status_countdown", lang))
-            self.status_text.setStyleSheet("color: #ef4444; font-weight: bold;")
+    def _update_download_cards(self, items: list):
+        current_ids = {item.get("id", item.get("item_id", "")) for item in items if item.get("id") or item.get("item_id")}
 
-    def _update_download_cards(self, active_items: list):
-        current_ids = {item.get("id") for item in active_items if item.get("id")}
-        
-        for old_id in list(self.active_cards.keys()):
-            if old_id not in current_ids:
-                card = self.active_cards.pop(old_id)
-                self.downloads_layout.removeWidget(card)
+        # Remove finished/stale cards
+        for iid in list(self.active_cards.keys()):
+            if iid not in current_ids:
+                card = self.active_cards.pop(iid)
+                self.cards_layout.removeWidget(card)
                 card.deleteLater()
 
-        if not active_items:
-            self.empty_label.show()
-        else:
-            self.empty_label.hide()
-            for item in active_items:
-                iid = item.get("id")
-                if not iid:
-                    continue
-                if iid in self.active_cards:
-                    self.active_cards[iid].update_data(item)
-                else:
-                    is_sel = iid in self.engine.selected_item_ids or not self.engine.selected_item_ids
-                    if is_sel:
-                        self.engine.selected_item_ids.add(iid)
-                    card = DownloadCard(item, is_selected=is_sel)
-                    card.selection_changed.connect(self._on_card_selection_changed)
-                    self.active_cards[iid] = card
-                    self.downloads_layout.insertWidget(self.downloads_layout.count() - 1, card)
+        # Add or update existing cards
+        for item in items:
+            iid = item.get("id", item.get("item_id", ""))
+            if not iid:
+                continue
+            if iid not in self.active_cards:
+                is_selected = iid in self.engine.selected_item_ids if self.engine.selected_item_ids else True
+                card = DownloadCard(item, is_selected=is_selected, parent=self.cards_container)
+                card.selection_changed.connect(self.engine.toggle_item_selection)
+                self.cards_layout.insertWidget(0, card)
+                self.active_cards[iid] = card
+                self._log_feed(f"Detected download: {item.get('name', 'App')} ({item.get('platform', 'App').upper()})")
+            else:
+                self.active_cards[iid].update_data(item)
 
-    def _on_card_selection_changed(self, item_id: str, is_selected: bool):
-        self.engine.toggle_item_selection(item_id, is_selected)
-        logger.info(f"Target item toggled: {item_id} -> {is_selected}")
+        self.empty_lbl.setVisible(len(self.active_cards) == 0)
 
-    def _on_update_available(self, version: str, notes: str, url: str):
-        lang = self.config.get("language", "ar")
-        self.latest_update_url = url
-        self.update_banner.setText(tr("update_available_banner", lang, version=f"v{version}"))
-        self.update_banner.show()
+    def _log_feed(self, msg: str):
+        item = QListWidgetItem(msg)
+        self.log_list.insertItem(0, item)
+        if self.log_list.count() > 300:
+            self.log_list.takeItem(self.log_list.count() - 1)
 
-    def _open_update_link(self):
-        if self.latest_update_url:
-            webbrowser.open(self.latest_update_url)
-
-    def _on_countdown_started(self, duration: int, action: str):
-        if self.countdown_dialog:
-            self.countdown_dialog.close()
-        self.countdown_dialog = CountdownWarningDialog(duration, action, self.engine, self)
-        self.countdown_dialog.show()
-        lang = self.config.get("language", "ar")
-        self.tray.show_notification(tr("countdown_title", lang), tr("countdown_desc", lang))
+    def _on_countdown_start(self, seconds: int, action: str):
+        if not self.countdown_dialog:
+            action_tr = t(f"action_{action}") if action else "Shutdown"
+            self.countdown_dialog = CountdownWarningDialog(seconds, action_tr, self)
+            self.countdown_dialog.cancelled.connect(lambda: self.engine.cancel_countdown("User cancelled"))
+            self.countdown_dialog.snoozed.connect(self.engine.snooze)
+            self.countdown_dialog.show()
 
     def _on_countdown_tick(self, remaining: int):
-        if self.countdown_dialog and self.countdown_dialog.isVisible():
+        if self.countdown_dialog:
             self.countdown_dialog.update_tick(remaining)
 
     def _on_countdown_aborted(self, reason: str):
         if self.countdown_dialog:
             self.countdown_dialog.close()
             self.countdown_dialog = None
-        self.tray.show_notification("NightByte", f"Countdown Cancelled: {reason}")
+        self._log_feed(f"Countdown cancelled: {reason}")
 
     def _on_action_executed(self, action: str):
-        if self.countdown_dialog:
-            self.countdown_dialog.close()
-            self.countdown_dialog = None
+        self._log_feed(f"Executed action: {action}")
 
-    def _on_log_added(self, timestamp: str, level: str, msg: str):
-        item = QListWidgetItem(f"[{timestamp}]  {msg}")
-        if level == "SUCCESS":
-            item.setForeground(QColor("#10b981"))
-        elif level == "WARNING":
-            item.setForeground(QColor("#f59e0b"))
-        elif level == "ERROR":
-            item.setForeground(QColor("#ef4444"))
-        else:
-            item.setForeground(QColor("#94a3b8"))
-        self.log_list.addItem(item)
-        self.log_list.scrollToBottom()
+    def _on_update_available(self, version: str, url: str):
+        self.latest_update_url = url
+        self.update_banner.setText(t("update_banner", version=version))
+        self.update_banner.show()
 
-    def _on_settings_saved(self):
-        self.apply_language_and_direction()
+    def _on_platform_toggle(self, key: str, enabled: bool):
+        cfg_map = {
+            "steam": "monitor_steam",
+            "epic": "monitor_epic",
+            "torrent": "monitor_torrents",
+            "ea_bnet": "monitor_ea",
+            "idm": "monitor_idm_browsers",
+        }
+        cfg_key = cfg_map.get(key)
+        if cfg_key:
+            self.config.set(cfg_key, enabled)
+        self.engine.set_platform_enabled(key, enabled)
+        self._log_feed(f"Platform '{key.upper()}' monitoring {'enabled' if enabled else 'disabled'}.")
 
-    def _connect_tray_signals(self):
-        self.tray.show_window_requested.connect(self._show_and_activate)
-        self.tray.toggle_monitoring_requested.connect(self._toggle_monitoring)
-        self.tray.cancel_shutdown_requested.connect(lambda: self.engine.cancel_countdown("Tray Cancel"))
-        self.tray.quit_requested.connect(QApplication.instance().quit)
+    def _open_settings(self):
+        self.tabs.setCurrentIndex(3)
 
-    def _show_and_activate(self):
-        self.showNormal()
-        self.activateWindow()
+    # ── Window Behavior & Dragging ────────────────────────────────────────────
 
-    def _handle_close_button(self):
+    def _close_or_tray(self):
         if self.config.get("close_to_tray", True):
             self.hide()
-            self.tray.show_notification(
-                "NightByte",
-                "Application minimized to System Tray / تم تصغير البرنامج لشريط المهام"
-            )
+            self.tray.show_tray_message("NightByte", "Running in background.")
         else:
-            QApplication.instance().quit()
+            self._exit_app()
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton and event.position().y() <= 40:
+    def _exit_app(self):
+        self.engine.stop_monitoring()
+        QApplication.quit()
+
+    def show_window(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and e.position().y() < 44:
             self.dragging = True
-            self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
+            self.drag_position = e.globalPosition().toPoint() - self.frameGeometry().topLeft()
 
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.dragging = False
-            event.accept()
+    def mouseMoveEvent(self, e):
+        if self.dragging and e.buttons() & Qt.LeftButton:
+            self.move(e.globalPosition().toPoint() - self.drag_position)
 
-    def mouseMoveEvent(self, event):
-        if self.dragging and event.buttons() & Qt.LeftButton:
-            self.move(event.globalPosition().toPoint() - self.drag_position)
-            event.accept()
+    def mouseReleaseEvent(self, _):
+        self.dragging = False
+
+    def closeEvent(self, e):
+        if self.config.get("close_to_tray", True):
+            e.ignore()
+            self.hide()
+        else:
+            self.engine.stop_monitoring()
+            e.accept()

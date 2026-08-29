@@ -1,64 +1,59 @@
 """
-NightByte AI - Modern Platform Toggle Chip
-Sleek, pill-shaped interactive toggle button for platform filtering.
+NightByte AI — Platform Chip Widget
+Active = white bg / black text.  Inactive = dark outlined pill.
 """
 
 from PySide6.QtWidgets import QPushButton
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QCursor
+from PySide6.QtCore import Signal
 
 
 class PlatformChip(QPushButton):
-    """Modern pill toggle button representing a game platform."""
-
     toggled_platform = Signal(str, bool)
 
-    def __init__(self, platform_key: str, label_text: str, is_active: bool = True, parent=None):
-        super().__init__(label_text, parent)
-        self.platform_key = platform_key
+    _ACTIVE_STYLE = """
+        QPushButton {
+            background-color: #ffffff;
+            color: #000000;
+            border: none;
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-weight: 800;
+            font-size: 12px;
+            min-height: 32px;
+        }
+        QPushButton:hover {
+            background-color: #e8e8e8;
+        }
+    """
+
+    _INACTIVE_STYLE = """
+        QPushButton {
+            background-color: transparent;
+            color: #666666;
+            border: 1px solid #2a2a2a;
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-weight: 600;
+            font-size: 12px;
+            min-height: 32px;
+        }
+        QPushButton:hover {
+            border-color: #555555;
+            color: #aaaaaa;
+        }
+    """
+
+    def __init__(self, label: str, key: str, active: bool = True, parent=None):
+        super().__init__(label, parent)
+        self.key = key
         self.setCheckable(True)
-        self.setChecked(is_active)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(32)
-        self.setObjectName("PlatformChip")
-        self._update_style()
-        self.toggled.connect(self._on_toggled)
+        self.setChecked(active)
+        self._refresh()
+        self.toggled.connect(self._on_toggle)
 
-    def _on_toggled(self, checked: bool):
-        self._update_style()
-        self.toggled_platform.emit(self.platform_key, checked)
+    def _refresh(self):
+        self.setStyleSheet(self._ACTIVE_STYLE if self.isChecked() else self._INACTIVE_STYLE)
 
-    def _update_style(self):
-        if self.isChecked():
-            self.setStyleSheet("""
-                QPushButton#PlatformChip {
-                    background-color: rgba(59, 130, 246, 0.18);
-                    color: #60a5fa;
-                    border: 1px solid #3b82f6;
-                    border-radius: 8px;
-                    padding: 5px 14px;
-                    font-weight: 700;
-                    font-size: 12px;
-                }
-                QPushButton#PlatformChip:hover {
-                    background-color: rgba(59, 130, 246, 0.28);
-                    border-color: #60a5fa;
-                }
-            """)
-        else:
-            self.setStyleSheet("""
-                QPushButton#PlatformChip {
-                    background-color: rgba(255, 255, 255, 0.03);
-                    color: #64748b;
-                    border: 1px solid rgba(255, 255, 255, 0.08);
-                    border-radius: 8px;
-                    padding: 5px 14px;
-                    font-weight: 500;
-                    font-size: 12px;
-                }
-                QPushButton#PlatformChip:hover {
-                    background-color: rgba(255, 255, 255, 0.06);
-                    color: #94a3b8;
-                    border-color: rgba(255, 255, 255, 0.15);
-                }
-            """)
+    def _on_toggle(self, checked: bool):
+        self._refresh()
+        self.toggled_platform.emit(self.key, checked)

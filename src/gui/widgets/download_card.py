@@ -1,6 +1,6 @@
 """
 NightByte AI - Interactive Download Card Widget
-Clean game card with selectable checkmark to target specific games for shutdown.
+Monochrome Dark theme styling, clean typography, progress bar and target toggle.
 """
 
 from PySide6.QtWidgets import (
@@ -10,68 +10,91 @@ from PySide6.QtCore import Qt, Signal
 
 
 class DownloadCard(QFrame):
-    """Interactive card for active games with target selection checkbox."""
+    """Interactive card for active games/downloads with target selection checkbox."""
 
     selection_changed = Signal(str, bool)  # item_id, is_selected
+
+    STYLE = """
+        #DownloadCard {
+            background-color: #141414;
+            border: 1px solid #242424;
+            border-radius: 10px;
+        }
+        #DownloadCard:hover {
+            border-color: #444444;
+        }
+        #TitleLabel {
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 13px;
+        }
+        #PlatformBadge {
+            background-color: #ffffff;
+            color: #000000;
+            border-radius: 4px;
+            padding: 2px 7px;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }
+        #StateBadge {
+            color: #888888;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        #SizeLabel {
+            color: #666666;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        #PercentLabel {
+            color: #ffffff;
+            font-weight: 700;
+            font-size: 11px;
+        }
+        QProgressBar {
+            background-color: #222222;
+            border: none;
+            border-radius: 3px;
+            height: 5px;
+        }
+        QProgressBar::chunk {
+            background-color: #ffffff;
+            border-radius: 3px;
+        }
+        QCheckBox {
+            spacing: 0px;
+        }
+        QCheckBox::indicator {
+            width: 16px;
+            height: 16px;
+            border: 1px solid #333333;
+            border-radius: 4px;
+            background-color: #1c1c1c;
+        }
+        QCheckBox::indicator:hover {
+            border-color: #ffffff;
+        }
+        QCheckBox::indicator:checked {
+            background-color: #ffffff;
+            border-color: #ffffff;
+        }
+    """
 
     def __init__(self, item_data: dict, is_selected: bool = True, parent=None):
         super().__init__(parent)
         self.setObjectName("DownloadCard")
+        self.setStyleSheet(self.STYLE)
         self.item_data = item_data
-        self.item_id = item_data.get("id", "")
+        self.item_id = item_data.get("id", item_data.get("item_id", ""))
         self.setup_ui(is_selected)
         self.update_data(item_data)
 
     def setup_ui(self, is_selected: bool):
         self.setFrameShape(QFrame.StyledPanel)
-        self.setStyleSheet("""
-            #DownloadCard {
-                background-color: #111827;
-                border: 1px solid #1f2937;
-                border-radius: 10px;
-                padding: 8px;
-            }
-            #DownloadCard:hover {
-                border-color: #0284c7;
-            }
-            #TitleLabel {
-                color: #f8fafc;
-                font-weight: bold;
-                font-size: 13px;
-            }
-            #PlatformBadge {
-                background-color: #0f172a;
-                color: #38bdf8;
-                border: 1px solid #0284c7;
-                border-radius: 4px;
-                padding: 2px 6px;
-                font-size: 10px;
-                font-weight: bold;
-            }
-            #StateBadge {
-                color: #10b981;
-                font-size: 11px;
-                font-weight: 600;
-            }
-            #SizeLabel {
-                color: #94a3b8;
-                font-size: 11px;
-            }
-            QProgressBar {
-                background-color: #0f172a;
-                border: 1px solid #1e293b;
-                border-radius: 3px;
-                height: 6px;
-                text-align: right;
-            }
-            QProgressBar::chunk {
-                background-color: #0284c7;
-                border-radius: 2px;
-            }
-        """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(6)
 
         # Header Row: Checkbox + Platform + Title + State
@@ -80,7 +103,7 @@ class DownloadCard(QFrame):
 
         self.check = QCheckBox()
         self.check.setChecked(is_selected)
-        self.check.setToolTip("Check to target this specific download / اختر للمراقبة المخصصة")
+        self.check.setToolTip("Toggle targeted monitoring for this item")
         self.check.toggled.connect(self._on_check_toggled)
         header_layout.addWidget(self.check)
 
@@ -114,7 +137,7 @@ class DownloadCard(QFrame):
         footer_layout.addStretch()
 
         self.percent_label = QLabel("0%")
-        self.percent_label.setStyleSheet("color: #38bdf8; font-weight: bold; font-size: 11px;")
+        self.percent_label.setObjectName("PercentLabel")
         footer_layout.addWidget(self.percent_label)
 
         layout.addLayout(footer_layout)
@@ -124,8 +147,8 @@ class DownloadCard(QFrame):
 
     def update_data(self, item: dict):
         self.item_data = item
-        self.item_id = item.get("id", "")
-        self.title_label.setText(item.get("name", "Unknown Game"))
+        self.item_id = item.get("id", item.get("item_id", ""))
+        self.title_label.setText(item.get("name", "Unknown Download"))
         self.platform_badge.setText(item.get("platform", "APP").upper())
 
         state_str = item.get("state", "Active")
@@ -142,7 +165,10 @@ class DownloadCard(QFrame):
         else:
             self.progress_bar.setRange(0, 0)
             self.percent_label.setText("Active")
-            self.size_label.setText(f"{self._format_bytes(dl_bytes)} transferred" if dl_bytes > 0 else "Active Process")
+            self.size_label.setText(f"{self._format_bytes(dl_bytes)} received" if dl_bytes > 0 else "Active Process")
+
+    def update_item(self, item: dict):
+        self.update_data(item)
 
     def _format_bytes(self, b: int) -> str:
         if b >= 1024**3:

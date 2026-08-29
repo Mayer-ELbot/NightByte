@@ -1,17 +1,11 @@
 """
-SteamDown Ultra AI - Theme Manager
-Manages application stylesheets and dynamic widget polishing.
+NightByte AI - Theme Manager
 """
-
-from PySide6.QtWidgets import QWidget, QApplication
-from themes.styles import CYBERPUNK_DARK
+from PySide6.QtWidgets import QApplication
+from themes.styles import MONO_DARK
 
 
 class ThemeManager:
-    """Singleton managing application visual appearance and styling."""
-
     @staticmethod
-    def apply_theme(app_or_widget, theme_name: str = "cyberpunk_dark"):
-        """Apply selected stylesheet."""
-        stylesheet = CYBERPUNK_DARK
-        app_or_widget.setStyleSheet(stylesheet)
+    def apply_theme(app: QApplication, _name: str = "mono_dark"):
+        app.setStyleSheet(MONO_DARK)

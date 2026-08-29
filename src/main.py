@@ -30,8 +30,8 @@ def main():
     app.setApplicationName("NightByte AI")
     app.setOrganizationName("NightByte")
 
-    # 2. Apply Minimalist Cyberpunk Dark Theme
-    ThemeManager.apply_theme(app, "cyberpunk_dark")
+    # 2. Apply Monochrome Dark Theme
+    ThemeManager.apply_theme(app, "mono_dark")
 
     # 3. Create Main Dashboard
     window = MainWindow()
