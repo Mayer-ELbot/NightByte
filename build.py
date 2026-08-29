@@ -48,13 +48,10 @@ def build_exe():
         print("BUILD SUCCESSFUL!")
         dist_exe = os.path.join("dist", "NightByte.exe")
         target_exe = "NightByte.exe"
-        steam_exe = "SteamDown.exe"
         if os.path.exists(dist_exe):
             shutil.copy2(dist_exe, target_exe)
-            shutil.copy2(dist_exe, steam_exe)
             size_mb = os.path.getsize(target_exe) / (1024 * 1024)
-            print(f"Output executable 1: {os.path.abspath(target_exe)} ({size_mb:.2f} MB)")
-            print(f"Output executable 2: {os.path.abspath(steam_exe)} ({size_mb:.2f} MB)")
+            print(f"Output executable: {os.path.abspath(target_exe)} ({size_mb:.2f} MB)")
         print("=" * 60)
     else:
         print("\nBUILD FAILED with return code:", result.returncode)

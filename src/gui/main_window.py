@@ -1,7 +1,6 @@
 """
 NightByte AI - Master GUI Main Window
-Designed for ultimate minimalism, simplicity, clarity, and ease of use.
-Includes GitHub update banner, live speed hero, clean controls, and activity explainer log.
+Clean, modern, minimalist interface with platform selector and granular game targeting.
 """
 
 import os
@@ -10,7 +9,7 @@ import webbrowser
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QStackedWidget,
     QComboBox, QFrame, QScrollArea, QListWidget, QListWidgetItem, QTabWidget,
-    QApplication
+    QCheckBox, QRadioButton, QButtonGroup, QApplication
 )
 from PySide6.QtCore import Qt, QPoint, Signal, QTimer
 from PySide6.QtGui import QIcon, QColor, QFont, QPixmap
@@ -38,45 +37,45 @@ class MainWindow(QWidget):
         self.updater = UpdateChecker(self)
         self.countdown_dialog = None
         self.latest_update_url = ""
-        
+        self.active_cards = {}  # item_id -> DownloadCard
+
         # Window properties
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
-        self.resize(760, 640)
-        self.setMinimumSize(620, 500)
-        
+        self.resize(740, 640)
+        self.setMinimumSize(640, 520)
+
         self.dragging = False
         self.drag_position = QPoint()
-        
+
         # Build UI
         self.setup_ui()
         self.apply_language_and_direction()
-        
+
         # System Tray
         app_icon = self._get_app_icon()
         self.setWindowIcon(app_icon)
         self.tray = TrayManager(app_icon, self)
         self._connect_tray_signals()
         self.tray.show()
-        
+
         # Connect Engine Signals
         self.engine.stats_updated.connect(self._on_stats_updated)
         self.engine.countdown_started.connect(self._on_countdown_started)
         self.engine.countdown_tick.connect(self._on_countdown_tick)
         self.engine.countdown_aborted.connect(self._on_countdown_aborted)
         self.engine.action_executed.connect(self._on_action_executed)
-        
-        # Connect Updater Signals
+
+        # Connect Updater
         self.updater.update_available.connect(self._on_update_available)
         if self.config.get("auto_check_updates", True):
-            QTimer.singleShot(2000, self.updater.check_for_updates_async)
-            
+            QTimer.singleShot(2500, self.updater.check_for_updates_async)
+
         # Connect Logger
         logger.log_added.connect(self._on_log_added)
         for t, lvl, msg in logger.history:
             self._on_log_added(t, lvl, msg)
 
     def _get_app_icon(self) -> QIcon:
-        """Create or load default icon."""
         base_dir = getattr(sys, "_MEIPASS", os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
         icon_path = os.path.join(base_dir, "assets", "app_icon.png")
         if os.path.exists(icon_path):
@@ -138,32 +137,28 @@ class MainWindow(QWidget):
         layout.setContentsMargins(14, 0, 8, 0)
         layout.setSpacing(8)
 
-        # Logo & App Title
-        self.title_label = QLabel("⚡ NightByte AI")
+        self.title_label = QLabel("⚡ NightByte")
         self.title_label.setObjectName("AppTitle")
         layout.addWidget(self.title_label)
 
         self.version_tag = QLabel(f"v{CURRENT_VERSION}")
-        self.version_tag.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 600; margin-left: 4px;")
+        self.version_tag.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 600;")
         layout.addWidget(self.version_tag)
 
         layout.addStretch()
 
-        # Language Switch
         self.lang_btn = QPushButton("🌐 العربية")
         self.lang_btn.setObjectName("TitleButton")
         self.lang_btn.setCursor(Qt.PointingHandCursor)
         self.lang_btn.clicked.connect(self._toggle_language)
         layout.addWidget(self.lang_btn)
 
-        # Minimize
         min_btn = QPushButton("─")
         min_btn.setObjectName("TitleButton")
         min_btn.setCursor(Qt.PointingHandCursor)
         min_btn.clicked.connect(self.showMinimized)
         layout.addWidget(min_btn)
 
-        # Close
         close_btn = QPushButton("✕")
         close_btn.setObjectName("CloseTitleButton")
         close_btn.setCursor(Qt.PointingHandCursor)
@@ -176,36 +171,32 @@ class MainWindow(QWidget):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(12)
+        layout.setSpacing(10)
 
-        # 1. Hero Card (Minimalist speed & master power button)
+        # 1. Minimalist Hero Card
         hero_card = QFrame()
         hero_card.setObjectName("HeroCard")
         hero_layout = QVBoxLayout(hero_card)
-        hero_layout.setContentsMargins(16, 14, 16, 14)
+        hero_layout.setContentsMargins(16, 12, 16, 12)
         hero_layout.setSpacing(10)
 
-        # Top line in Hero: Speed display + Net badge
-        speed_row = QHBoxLayout()
-        
+        top_row = QHBoxLayout()
         self.hero_speed_val = QLabel("0.0")
         self.hero_speed_val.setObjectName("HeroSpeed")
-        speed_row.addWidget(self.hero_speed_val)
+        top_row.addWidget(self.hero_speed_val)
 
         self.hero_speed_unit = QLabel("KB/s")
         self.hero_speed_unit.setObjectName("HeroSpeedUnit")
-        speed_row.addWidget(self.hero_speed_unit)
+        top_row.addWidget(self.hero_speed_unit)
 
-        speed_row.addStretch()
+        top_row.addStretch()
 
-        # Net status badge
         self.net_badge = QLabel("🟢 متصل")
         self.net_badge.setStyleSheet("background: #0f172a; color: #10b981; border: 1px solid #1e293b; border-radius: 6px; padding: 4px 10px; font-weight: bold; font-size: 11px;")
-        speed_row.addWidget(self.net_badge)
+        top_row.addWidget(self.net_badge)
+        hero_layout.addLayout(top_row)
 
-        hero_layout.addLayout(speed_row)
-
-        # Master Power Button
+        # Master Start/Stop Button
         self.power_btn = QPushButton("▶️ بدء المراقبة الذكية")
         self.power_btn.setObjectName("MasterPowerBtn")
         self.power_btn.setCursor(Qt.PointingHandCursor)
@@ -214,20 +205,43 @@ class MainWindow(QWidget):
 
         layout.addWidget(hero_card)
 
-        # 2. Compact Metric Pills Row
-        pills_layout = QHBoxLayout()
-        pills_layout.setSpacing(8)
+        # 2. Platform Chips Row (Interactive Checkboxes for platforms!)
+        platform_frame = QFrame()
+        platform_frame.setStyleSheet("background-color: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 6px;")
+        platform_layout = QHBoxLayout(platform_frame)
+        platform_layout.setContentsMargins(8, 4, 8, 4)
+        platform_layout.setSpacing(10)
 
-        self.pill_disk = self._create_metric_pill("metric_disk_write", "0 KB/s")
-        pills_layout.addWidget(self.pill_disk)
+        plat_title = QLabel("المنصات:")
+        plat_title.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 11px;")
+        platform_layout.addWidget(plat_title)
 
-        self.pill_tot = self._create_metric_pill("metric_total_downloaded", "0 MB")
-        pills_layout.addWidget(self.pill_tot)
+        self.chip_steam = QCheckBox("Steam")
+        self.chip_steam.setChecked(True)
+        self.chip_steam.toggled.connect(lambda c: self.engine.set_platform_enabled("steam", c))
+        platform_layout.addWidget(self.chip_steam)
 
-        self.pill_items = self._create_metric_pill("metric_active_items", "0")
-        pills_layout.addWidget(self.pill_items)
+        self.chip_epic = QCheckBox("Epic Games")
+        self.chip_epic.setChecked(True)
+        self.chip_epic.toggled.connect(lambda c: self.engine.set_platform_enabled("epic", c))
+        platform_layout.addWidget(self.chip_epic)
 
-        layout.addLayout(pills_layout)
+        self.chip_torrent = QCheckBox("Torrent")
+        self.chip_torrent.setChecked(True)
+        self.chip_torrent.toggled.connect(lambda c: self.engine.set_platform_enabled("torrent", c))
+        platform_layout.addWidget(self.chip_torrent)
+
+        self.chip_ea = QCheckBox("EA / Battle.net")
+        self.chip_ea.setChecked(True)
+        self.chip_ea.toggled.connect(lambda c: self.engine.set_platform_enabled("ea_bnet", c))
+        platform_layout.addWidget(self.chip_ea)
+
+        self.chip_idm = QCheckBox("IDM / متصفح")
+        self.chip_idm.setChecked(True)
+        self.chip_idm.toggled.connect(lambda c: self.engine.set_platform_enabled("idm", c))
+        platform_layout.addWidget(self.chip_idm)
+
+        layout.addWidget(platform_frame)
 
         # 3. Vector Speed Graph
         self.speed_graph = LiveSpeedGraph()
@@ -265,43 +279,45 @@ class MainWindow(QWidget):
         layout.addWidget(self.status_banner)
         return widget
 
-    def _create_metric_pill(self, title_key: str, initial_val: str) -> QFrame:
-        pill = QFrame()
-        pill.setObjectName("MetricPill")
-        layout = QHBoxLayout(pill)
-        layout.setContentsMargins(10, 6, 10, 6)
-        layout.setSpacing(6)
-
-        t_lbl = QLabel(title_key)
-        t_lbl.setObjectName("MetricPillTitle")
-        layout.addWidget(t_lbl)
-
-        layout.addStretch()
-
-        v_lbl = QLabel(initial_val)
-        v_lbl.setObjectName("MetricPillVal")
-        layout.addWidget(v_lbl)
-
-        pill.title_label = t_lbl
-        pill.value_label = v_lbl
-        pill.title_key = title_key
-        return pill
-
     def _create_downloads_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(8)
 
+        # Target Mode Switch Header
+        mode_frame = QFrame()
+        mode_frame.setStyleSheet("background-color: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 6px;")
+        mode_layout = QHBoxLayout(mode_frame)
+        mode_layout.setContentsMargins(8, 4, 8, 4)
+
+        mode_lbl = QLabel("🎯 وضع الهدف:")
+        mode_lbl.setStyleSheet("color: #38bdf8; font-weight: bold; font-size: 11px;")
+        mode_layout.addWidget(mode_lbl)
+
+        self.radio_mode_all = QRadioButton("كل التحميلات في المنصات المحددة")
+        self.radio_mode_all.setChecked(True)
+        self.radio_mode_all.toggled.connect(self._on_target_mode_toggled)
+        mode_layout.addWidget(self.radio_mode_all)
+
+        self.radio_mode_selected = QRadioButton("فقط الألعاب / الملفات المحددة بالصح (✓)")
+        self.radio_mode_selected.toggled.connect(self._on_target_mode_toggled)
+        mode_layout.addWidget(self.radio_mode_selected)
+
+        mode_layout.addStretch()
+        layout.addWidget(mode_frame)
+
+        # Scroll Area for active cards
         self.downloads_scroll = QScrollArea()
         self.downloads_scroll.setWidgetResizable(True)
-        
+
         self.downloads_container = QWidget()
         self.downloads_layout = QVBoxLayout(self.downloads_container)
         self.downloads_layout.setContentsMargins(4, 4, 4, 4)
         self.downloads_layout.setSpacing(6)
         self.downloads_layout.setAlignment(Qt.AlignTop)
 
-        self.empty_label = QLabel("لا توجد تنزيلات نشطة حالياً في المنصات المحددة.")
+        self.empty_label = QLabel("لا توجد ألعاب أو تنزيلات نشطة حالياً.\n(بمجرد بدء أي تحميل في ستيم أو إيبك أو التورنت، ستظهر هنا فوراً)")
         self.empty_label.setAlignment(Qt.AlignCenter)
         self.empty_label.setStyleSheet("color: #64748b; font-size: 13px; margin-top: 40px;")
         self.downloads_layout.addWidget(self.empty_label)
@@ -316,11 +332,10 @@ class MainWindow(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(8)
 
-        # Explainer guide banner
         guide_banner = QFrame()
         guide_banner.setStyleSheet("background-color: #111827; border: 1px solid #1e293b; border-radius: 8px; padding: 8px 12px;")
         guide_layout = QHBoxLayout(guide_banner)
-        guide_lbl = QLabel("📖 <b>سجل النشاط والشرح اللحظي:</b> يعرض هذا السجل كل ما يقوم به المحرك الذكي خطوة بخطوة باللغة الطبيعية (حالة النت، مراحل ستيم، الـ AFK، والمؤقتات).")
+        guide_lbl = QLabel("📖 <b>سجل النشاط المباشر:</b> يشرح باللغة البسيطة ما يفعله البرنامج لحظة بلحظة (فحص النت، كشف الألعاب، مؤقتات الإيقاف، وحماية تفاعل المستخدم).")
         guide_lbl.setWordWrap(True)
         guide_lbl.setStyleSheet("color: #94a3b8; font-size: 11px;")
         guide_layout.addWidget(guide_lbl)
@@ -340,12 +355,17 @@ class MainWindow(QWidget):
 
         return widget
 
+    def _on_target_mode_toggled(self):
+        if self.radio_mode_selected.isChecked():
+            self.engine.set_target_mode("selected")
+        else:
+            self.engine.set_target_mode("all")
+
     def _populate_actions_combo(self):
-        """Fill action combo with translated action options."""
         lang = self.config.get("language", "ar")
         self.action_combo.blockSignals(True)
         self.action_combo.clear()
-        
+
         actions = [
             ("action_shutdown", "shutdown"),
             ("action_sleep", "sleep"),
@@ -356,7 +376,7 @@ class MainWindow(QWidget):
             ("action_close_launchers", "close_launchers"),
             ("action_monitors_off", "monitors_off"),
         ]
-        
+
         curr_act = self.config.get("default_action", "shutdown")
         select_idx = 0
         for i, (key, val) in enumerate(actions):
@@ -371,7 +391,7 @@ class MainWindow(QWidget):
         action_val = self.action_combo.currentData()
         if action_val:
             self.config.set("default_action", action_val)
-            logger.info(f"Scheduled action updated to: {action_val}")
+            logger.info(f"Scheduled action set to: {action_val}")
 
     def _toggle_monitoring(self):
         if self.engine.is_enabled:
@@ -402,37 +422,26 @@ class MainWindow(QWidget):
         is_rtl = (lang == "ar")
         self.setLayoutDirection(Qt.RightToLeft if is_rtl else Qt.LeftToRight)
 
-        # Title Bar
         self.lang_btn.setText("English" if lang == "ar" else "العربية")
         self.title_label.setText(tr("app_name", lang))
 
-        # Tabs
         self.nav_tabs.setTabText(0, f"📊 {tr('tab_dashboard', lang)}")
         self.nav_tabs.setTabText(1, f"🎮 {tr('tab_downloads', lang)}")
         self.nav_tabs.setTabText(2, f"📜 {tr('tab_logs', lang)}")
         self.nav_tabs.setTabText(3, f"⚙️ {tr('tab_settings', lang)}")
 
-        # Dashboard elements
         self._update_power_button_ui()
         self.action_label.setText(tr("label_select_action", lang))
         self._populate_actions_combo()
         self.clear_logs_btn.setText(f"🗑️ {tr('btn_clear_logs', lang)}")
         self.empty_label.setText(tr("no_active_downloads", lang))
 
-        # Metric Titles
-        self.pill_disk.title_label.setText(tr(self.pill_disk.title_key, lang))
-        self.pill_tot.title_label.setText(tr(self.pill_tot.title_key, lang))
-        self.pill_items.title_label.setText(tr(self.pill_items.title_key, lang))
-
-        # Settings screen reload
         self.settings_screen.setup_ui()
         self.settings_screen.load_values()
 
     def _on_stats_updated(self, snapshot: dict):
         lang = self.config.get("language", "ar")
         speed_kb = snapshot["download_speed_kb"]
-        disk_kb = snapshot["disk_write_kb"]
-        tot_bytes = snapshot["total_session_bytes"]
         is_online = snapshot["is_online"]
         ping = snapshot["ping_ms"]
         active_items = snapshot["active_items"]
@@ -454,33 +463,16 @@ class MainWindow(QWidget):
             self.net_badge.setText(f"🔴 {tr('net_offline', lang)} ({off_sec}s)")
             self.net_badge.setStyleSheet("background: #450a0a; color: #ef4444; border: 1px solid #ef4444; border-radius: 6px; padding: 4px 10px; font-weight: bold; font-size: 11px;")
 
-        # Disk write pill
-        if disk_kb >= 1024.0:
-            self.pill_disk.value_label.setText(f"{disk_kb / 1024.0:.1f} MB/s")
-        else:
-            self.pill_disk.value_label.setText(f"{disk_kb:.0f} KB/s")
-
-        # Total Data pill
-        if tot_bytes >= 1024**3:
-            self.pill_tot.value_label.setText(f"{tot_bytes / (1024**3):.2f} GB")
-        elif tot_bytes >= 1024**2:
-            self.pill_tot.value_label.setText(f"{tot_bytes / (1024**2):.1f} MB")
-        else:
-            self.pill_tot.value_label.setText(f"{tot_bytes / 1024:.0f} KB")
-
-        # Active items count
-        self.pill_items.value_label.setText(str(len(active_items)))
-
         # Vector Graph
         self.speed_graph.update_history(snapshot["speed_history"], speed_kb, snapshot["peak_speed_kb"])
 
         # Status Banner
         self._update_status_banner(snapshot["state"], snapshot["status_message"], lang)
 
-        # Download Cards
+        # Interactive Download Cards with Selection
         self._update_download_cards(active_items)
 
-        # System Tray
+        # Tray
         self.tray.update_status(snapshot["is_enabled"], speed_kb, is_online, snapshot["status_message"])
 
     def _update_status_banner(self, state: str, message: str, lang: str):
@@ -510,21 +502,40 @@ class MainWindow(QWidget):
             self.status_text.setStyleSheet("color: #ef4444; font-weight: bold;")
 
     def _update_download_cards(self, active_items: list):
-        while self.downloads_layout.count() > 1:
-            child = self.downloads_layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
+        current_ids = {item.get("id") for item in active_items if item.get("id")}
+        
+        # Remove old cards no longer present
+        for old_id in list(self.active_cards.keys()):
+            if old_id not in current_ids:
+                card = self.active_cards.pop(old_id)
+                self.downloads_layout.removeWidget(card)
+                card.deleteLater()
 
         if not active_items:
             self.empty_label.show()
         else:
             self.empty_label.hide()
             for item in active_items:
-                card = DownloadCard(item)
-                self.downloads_layout.insertWidget(self.downloads_layout.count() - 1, card)
+                iid = item.get("id")
+                if not iid:
+                    continue
+                if iid in self.active_cards:
+                    self.active_cards[iid].update_data(item)
+                else:
+                    # New item detected -> default selected
+                    is_sel = iid in self.engine.selected_item_ids or not self.engine.selected_item_ids
+                    if is_sel:
+                        self.engine.selected_item_ids.add(iid)
+                    card = DownloadCard(item, is_selected=is_sel)
+                    card.selection_changed.connect(self._on_card_selection_changed)
+                    self.active_cards[iid] = card
+                    self.downloads_layout.insertWidget(self.downloads_layout.count() - 1, card)
+
+    def _on_card_selection_changed(self, item_id: str, is_selected: bool):
+        self.engine.toggle_item_selection(item_id, is_selected)
+        logger.info(f"Toggled item selection: {item_id} -> {is_selected}")
 
     def _on_update_available(self, version: str, notes: str, url: str):
-        """Show top update banner."""
         lang = self.config.get("language", "ar")
         self.latest_update_url = url
         self.update_banner.setText(tr("update_available_banner", lang, version=f"v{version}"))
@@ -550,7 +561,7 @@ class MainWindow(QWidget):
         if self.countdown_dialog:
             self.countdown_dialog.close()
             self.countdown_dialog = None
-        self.tray.show_notification("NightByte AI", f"Countdown Cancelled: {reason}")
+        self.tray.show_notification("NightByte", f"Countdown Cancelled: {reason}")
 
     def _on_action_executed(self, action: str):
         if self.countdown_dialog:
@@ -587,7 +598,7 @@ class MainWindow(QWidget):
         if self.config.get("close_to_tray", True):
             self.hide()
             self.tray.show_notification(
-                "NightByte AI",
+                "NightByte",
                 "Application minimized to System Tray / تم تصغير البرنامج لشريط المهام"
             )
         else:

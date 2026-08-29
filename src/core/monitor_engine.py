@@ -1,6 +1,6 @@
 """
-SteamDown Ultra AI - Master Monitoring & Intelligence Engine
-Coordinates Steam detection, multi-platform launchers, I/O rates, Network Guardian, and Anti-AFK.
+NightByte AI - Master Monitoring & Intelligence Engine
+Coordinates Steam, Epic, Torrent, EA/Battle.net, and Targeted Specific Item Monitoring.
 """
 
 import time
@@ -13,6 +13,7 @@ from utils.sound_effects import SoundManager
 from core.network_guardian import NetworkGuardian
 from core.system_power import SystemPowerController
 from core.steam_detector import SteamDetector
+from core.launcher_detector import LauncherDetector
 
 
 class MonitorState:
@@ -28,26 +29,15 @@ class MonitorState:
 
 class MonitorEngine(QObject):
     """
-    Core intelligent engine managing download monitoring, network drop protection,
-    smart inactivity timers, on-screen warnings, and automated system actions.
+    Intelligent engine supporting platform filtering, targeted individual game monitoring,
+    internet drop protection, anti-AFK detection, and automatic shutdown.
     """
-    
+
     stats_updated = Signal(dict)
-    countdown_started = Signal(int, str)  # duration_sec, action
-    countdown_tick = Signal(int)          # remaining_sec
-    countdown_aborted = Signal(str)       # reason
-    action_executed = Signal(str)         # action
-    
-    # Process definitions for supported platforms
-    PLATFORM_PROCESSES = {
-        "epic": ["epicgameslauncher.exe"],
-        "ea": ["eadesktop.exe", "eabackgroundservice.exe", "origin.exe"],
-        "battlenet": ["battle.net.exe", "agent.exe"],
-        "xbox": ["xboxapp.exe", "gamingservices.exe"],
-        "ubisoft": ["upc.exe", "ubisoftconnect.exe"],
-        "torrents": ["qbittorrent.exe", "utorrent.exe", "bittorrent.exe", "transmission-qt.exe", "deluge.exe"],
-        "idm_browsers": ["idman.exe", "fdm.exe", "motrix.exe", "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe"],
-    }
+    countdown_started = Signal(int, str)
+    countdown_tick = Signal(int)
+    countdown_aborted = Signal(str)
+    action_executed = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -56,53 +46,85 @@ class MonitorEngine(QObject):
         self.network_guardian = NetworkGuardian(
             check_interval_sec=self.config.get("ping_interval_sec", 3)
         )
-        
+
         # State tracking
         self.is_enabled = False
         self.current_state = MonitorState.IDLE
-        self.status_message = "Idle"
-        
-        # Performance & IO Metrics
+        self.status_message = "Ready"
+
+        # Platform filter toggles
+        self.monitored_platforms = {
+            "steam": True,
+            "epic": True,
+            "torrent": True,
+            "ea_bnet": True,
+            "idm": True
+        }
+
+        # Specific Targeted Items Monitoring
+        self.target_mode = "all"        # "all" or "selected"
+        self.selected_item_ids = set()  # Specific item IDs to wait for (e.g. {"steam_1091500"})
+        self.initial_items_seen = set()
+
+        # IO Metrics
         self.prev_net_bytes = 0
         self.prev_disk_bytes = 0
         self.prev_time = time.time()
-        
+
         self.current_speed_kb = 0.0
         self.current_disk_kb = 0.0
         self.peak_speed_kb = 0.0
         self.total_session_bytes = 0
-        self.speed_history = [0.0] * 60  # Last 60 seconds history for UI graphs
-        
-        # Inactivity & Countdown Timers
+        self.speed_history = [0.0] * 60
+
+        # Timers
         self.below_threshold_start = None
         self.countdown_start = None
         self.countdown_remaining = 0
         self.snooze_until = None
-        
-        # Connect Network Guardian
+
         self.network_guardian.status_changed.connect(self._on_network_status_changed)
-        
-        # Main Engine Timer (1 Hz tick)
+
+        # Main Engine 1-sec Timer
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._engine_tick)
         self.timer.start(1000)
 
+    def set_platform_enabled(self, platform_key: str, enabled: bool):
+        """Toggle monitoring for a specific platform (steam, epic, torrent, etc.)."""
+        self.monitored_platforms[platform_key] = enabled
+        logger.info(f"Platform filter '{platform_key}' set to {enabled}")
+
+    def set_target_mode(self, mode: str, item_ids: set = None):
+        """Set whether to wait for ALL downloads or ONLY specific selected games/files."""
+        self.target_mode = mode
+        if item_ids is not None:
+            self.selected_item_ids = set(item_ids)
+        logger.info(f"Target mode set to '{mode}' with {len(self.selected_item_ids)} selected items.")
+
+    def toggle_item_selection(self, item_id: str, selected: bool):
+        """Add or remove an item from targeted monitoring."""
+        if selected:
+            self.selected_item_ids.add(item_id)
+        else:
+            self.selected_item_ids.discard(item_id)
+
     def start_monitoring(self):
-        """Enable smart monitoring mode."""
+        """Start smart download monitoring."""
         self.is_enabled = True
         self.below_threshold_start = None
         self.countdown_start = None
         self.snooze_until = None
         self.current_state = MonitorState.ACTIVE_DOWNLOADING
         self.network_guardian.start()
-        
+
         if self.config.get("prevent_sleep_during_download", True):
             SystemPowerController.set_awake_lock(True)
-            
-        logger.info("Smart Monitoring ENABLED.")
+
+        logger.info("Smart Download Monitoring STARTED.")
 
     def stop_monitoring(self):
-        """Disable smart monitoring mode."""
+        """Stop smart download monitoring."""
         self.is_enabled = False
         self.below_threshold_start = None
         self.countdown_start = None
@@ -110,69 +132,61 @@ class MonitorEngine(QObject):
         self.current_state = MonitorState.IDLE
         self.network_guardian.stop()
         SystemPowerController.set_awake_lock(False)
-        logger.info("Smart Monitoring DISABLED.")
+        logger.info("Smart Download Monitoring STOPPED.")
 
     def cancel_countdown(self, reason: str = "User cancelled"):
-        """Cancel an active countdown and reset timer."""
+        """Cancel an ongoing shutdown countdown."""
         self.countdown_start = None
         self.countdown_remaining = 0
         self.below_threshold_start = None
         self.current_state = MonitorState.ACTIVE_DOWNLOADING if self.is_enabled else MonitorState.IDLE
         self.countdown_aborted.emit(reason)
-        logger.info(f"Countdown aborted: {reason}")
+        logger.info(f"Countdown cancelled: {reason}")
 
     def snooze(self, seconds: int):
-        """Snooze the countdown for specified seconds."""
+        """Snooze monitoring."""
         self.snooze_until = time.time() + seconds
-        self.cancel_countdown(f"Snoozed for {seconds // 60} minutes")
-        logger.info(f"Snoozed monitoring for {seconds // 60} minutes.")
+        self.cancel_countdown(f"Snoozed for {seconds // 60}m")
+        logger.info(f"Monitoring snoozed for {seconds // 60} minutes.")
 
     def _on_network_status_changed(self, is_online: bool, ping_ms: float, offline_duration: int):
-        """Handle network status changes from Network Guardian."""
         if not self.is_enabled:
             return
-            
-        if not is_online:
-            if self.config.get("pause_on_disconnect", True):
-                if self.current_state in (MonitorState.BELOW_THRESHOLD, MonitorState.COUNTDOWN):
-                    logger.warning("Internet disconnected! Freezing shutdown timers.")
-                    self.current_state = MonitorState.PAUSED_NET_DROP
-                    self.below_threshold_start = None
-                    self.countdown_start = None
-        else:
-            if self.current_state == MonitorState.PAUSED_NET_DROP:
-                logger.info("Internet restored! Resuming download monitor.")
-                self.current_state = MonitorState.ACTIVE_DOWNLOADING
+        if not is_online and self.config.get("pause_on_disconnect", True):
+            if self.current_state in (MonitorState.BELOW_THRESHOLD, MonitorState.COUNTDOWN):
+                logger.warning("Internet disconnected! Freezing countdown timer to protect download.")
+                self.current_state = MonitorState.PAUSED_NET_DROP
+                self.below_threshold_start = None
+                self.countdown_start = None
+        elif is_online and self.current_state == MonitorState.PAUSED_NET_DROP:
+            logger.success("Internet reconnected! Resuming download monitor.")
+            self.current_state = MonitorState.ACTIVE_DOWNLOADING
 
     def _calculate_io_speeds(self) -> tuple[float, float]:
-        """Compute network download rate and disk write rate across system/launchers."""
         now = time.time()
         dt = max(0.1, now - self.prev_time)
-        
-        # 1. Network I/O
+
         net_io = psutil.net_io_counters()
-        cur_net_bytes = net_io.bytes_recv
+        cur_net = net_io.bytes_recv
         if self.prev_net_bytes > 0:
-            net_delta = max(0, cur_net_bytes - self.prev_net_bytes)
+            net_delta = max(0, cur_net - self.prev_net_bytes)
             speed_kb = (net_delta / 1024.0) / dt
             self.total_session_bytes += net_delta
         else:
             speed_kb = 0.0
-            
-        # 2. Disk I/O
+
         disk_io = psutil.disk_io_counters()
-        cur_disk_bytes = disk_io.write_bytes if disk_io else 0
+        cur_disk = disk_io.write_bytes if disk_io else 0
         if self.prev_disk_bytes > 0:
-            disk_delta = max(0, cur_disk_bytes - self.prev_disk_bytes)
+            disk_delta = max(0, cur_disk - self.prev_disk_bytes)
             disk_kb = (disk_delta / 1024.0) / dt
         else:
             disk_kb = 0.0
 
-        self.prev_net_bytes = cur_net_bytes
-        self.prev_disk_bytes = cur_disk_bytes
+        self.prev_net_bytes = cur_net
+        self.prev_disk_bytes = cur_disk
         self.prev_time = now
 
-        # Update speed history
         self.current_speed_kb = speed_kb
         self.current_disk_kb = disk_kb
         self.peak_speed_kb = max(self.peak_speed_kb, speed_kb)
@@ -182,53 +196,32 @@ class MonitorEngine(QObject):
 
         return speed_kb, disk_kb
 
-    def _scan_active_launchers(self) -> list[dict]:
-        """Check active games and launcher processes."""
-        active_items = []
-        
-        # 1. Steam deep detector
-        if self.config.get("monitor_steam", True):
-            steam_downloads = self.steam_detector.get_active_downloads()
-            active_items.extend(steam_downloads)
-            
-        # 2. Other platform processes
-        for platform_key, process_names in self.PLATFORM_PROCESSES.items():
-            if not self.config.get(f"monitor_{platform_key}", True):
-                continue
-            for proc in psutil.process_iter(["pid", "name"]):
-                try:
-                    pname = proc.info["name"]
-                    if pname and pname.lower() in process_names:
-                        # Check if process is actively doing IO
-                        p_io = proc.io_counters() if hasattr(proc, 'io_counters') else None
-                        active_items.append({
-                            "app_id": str(proc.info["pid"]),
-                            "name": pname,
-                            "platform": platform_key.upper(),
-                            "bytes_downloaded": p_io.read_bytes if p_io else 0,
-                            "bytes_total": 0,
-                            "state": "Active Process",
-                            "is_active": True,
-                            "progress_percent": 0.0
-                        })
-                        break
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-                    
-        return active_items
+    def _scan_all_platforms(self) -> list[dict]:
+        """Collect active items across all enabled platforms."""
+        items = []
+        if self.monitored_platforms.get("steam", True):
+            items.extend(self.steam_detector.get_active_downloads())
+        if self.monitored_platforms.get("epic", True):
+            items.extend(LauncherDetector.get_epic_active_downloads())
+        if self.monitored_platforms.get("torrent", True):
+            items.extend(LauncherDetector.get_torrent_active_downloads())
+        if self.monitored_platforms.get("ea_bnet", True):
+            items.extend(LauncherDetector.get_ea_bnet_active())
+        if self.monitored_platforms.get("idm", True):
+            items.extend(LauncherDetector.get_idm_browsers_active())
+        return items
 
     def _engine_tick(self):
-        """Master 1-second tick loop."""
         speed_kb, disk_kb = self._calculate_io_speeds()
         net_status = self.network_guardian.get_status()
-        active_items = self._scan_active_launchers()
-        
+        active_items = self._scan_all_platforms()
+
         threshold_kb = self.config.get("threshold_speed_kb", 50)
         inactivity_sec = self.config.get("inactivity_timeout_sec", 180)
         countdown_sec = self.config.get("countdown_duration_sec", 60)
-        
+
         now = time.time()
-        
+
         # Handle Snooze
         if self.snooze_until:
             if now < self.snooze_until:
@@ -241,133 +234,129 @@ class MonitorEngine(QObject):
 
         if not self.is_enabled:
             self.current_state = MonitorState.IDLE
-            self.status_message = "Monitoring disabled"
+            self.status_message = "Ready"
             self._broadcast_stats(speed_kb, disk_kb, active_items, net_status, 0, 0)
             return
 
-        # Check Internet Disconnection Guardian
+        # 1. Check Internet Guardian
         if not net_status["online"] and self.config.get("pause_on_disconnect", True):
             self.current_state = MonitorState.PAUSED_NET_DROP
-            self.status_message = "Internet disconnected - Timers paused"
+            self.status_message = "Internet disconnected - Timer frozen"
             self.below_threshold_start = None
             self.countdown_start = None
-            
-            # Check max offline timeout
-            max_offline = self.config.get("max_offline_wait_sec", 1800)
-            if 0 < max_offline <= net_status["offline_duration_sec"]:
-                logger.warning(f"Max offline wait of {max_offline}s reached!")
-                
             self._broadcast_stats(speed_kb, disk_kb, active_items, net_status, 0, 0)
             return
 
-        # Check Anti-AFK User Activity
+        # 2. Check Anti-AFK
         if self.config.get("anti_afk_enabled", True):
             user_idle = SystemPowerController.get_user_idle_seconds()
             afk_limit = self.config.get("afk_threshold_sec", 300)
             if user_idle < afk_limit:
-                # User is active!
                 if self.current_state == MonitorState.COUNTDOWN:
-                    self.cancel_countdown("User activity detected (Anti-AFK)")
+                    self.cancel_countdown("User activity detected")
                 self.current_state = MonitorState.PAUSED_AFK
-                self.status_message = "User is active - Action deferred"
+                self.status_message = "User is active"
                 self.below_threshold_start = None
                 self._broadcast_stats(speed_kb, disk_kb, active_items, net_status, 0, 0)
                 return
 
-        # Check Gaming Mode (full-screen app)
+        # 3. Check Gaming Mode
         if self.config.get("gaming_mode_protection", True):
             if SystemPowerController.is_fullscreen_app_running():
                 if self.current_state == MonitorState.COUNTDOWN:
-                    self.cancel_countdown("Full-screen game detected")
+                    self.cancel_countdown("Full-screen game running")
                 self.status_message = "Gaming mode active"
                 self.below_threshold_start = None
                 self._broadcast_stats(speed_kb, disk_kb, active_items, net_status, 0, 0)
                 return
 
-        # Determine download activity
-        has_active_manifest_dl = any(d.get("is_active") and d.get("state") == "Downloading" for d in active_items)
-        is_speed_active = speed_kb >= threshold_kb
+        # 4. Check Download Activity based on Target Mode
+        is_target_active = False
 
-        if is_speed_active or has_active_manifest_dl:
-            # Active downloading happening!
+        if self.target_mode == "selected" and self.selected_item_ids:
+            # Check if any of the user's SELECTED items is still active
+            for item in active_items:
+                if item.get("id") in self.selected_item_ids and item.get("is_active"):
+                    is_target_active = True
+                    break
+        else:
+            # Mode = ALL: Active if speed >= threshold OR any detected manifest item is downloading
+            has_manifest_dl = any(d.get("is_active") and d.get("state") in ("Downloading", "Patching", "Updating") for d in active_items)
+            is_target_active = (speed_kb >= threshold_kb) or has_manifest_dl
+
+        if is_target_active:
+            # Downloads are actively progressing
             self.current_state = MonitorState.ACTIVE_DOWNLOADING
-            self.status_message = f"Downloading active ({speed_kb:.1f} KB/s)"
+            self.status_message = f"Downloading ({speed_kb:.1f} KB/s)"
             self.below_threshold_start = None
             if self.countdown_start:
                 self.cancel_countdown("Download resumed")
         else:
-            # Speed is below threshold!
+            # Downloads finished / below threshold!
             if self.countdown_start is not None:
-                # We are in COUNTDOWN state!
                 elapsed = now - self.countdown_start
                 remaining = int(max(0, countdown_sec - elapsed))
                 self.countdown_remaining = remaining
                 self.current_state = MonitorState.COUNTDOWN
-                self.status_message = f"Countdown in progress: {remaining}s remaining"
+                self.status_message = f"Action in {remaining}s"
                 self.countdown_tick.emit(remaining)
-                
-                if self.config.get("sound_countdown_ticks", True) and remaining <= 10 and remaining > 0:
+
+                if self.config.get("sound_countdown_ticks", True) and 0 < remaining <= 10:
                     SoundManager.alert_countdown_tick()
-                    
+
                 if remaining <= 0:
                     self._trigger_final_action()
-                    
+
             elif self.below_threshold_start is None:
-                # Start below threshold wait
                 self.below_threshold_start = now
                 self.current_state = MonitorState.BELOW_THRESHOLD
-                self.status_message = f"Speed < {threshold_kb} KB/s. Inactivity timer started."
+                self.status_message = "Download finished. Waiting..."
             else:
-                # Below threshold timer running
                 time_below = now - self.below_threshold_start
                 if time_below >= inactivity_sec:
-                    # Inactivity threshold reached -> Start Countdown HUD!
                     self._start_countdown()
                 else:
-                    rem_inactivity = int(inactivity_sec - time_below)
+                    rem_inact = int(inactivity_sec - time_below)
                     self.current_state = MonitorState.BELOW_THRESHOLD
-                    self.status_message = f"Inactivity wait: {rem_inactivity}s until countdown"
+                    self.status_message = f"Inactivity wait: {rem_inact}s"
 
         timer_rem = 0
         if self.below_threshold_start:
             timer_rem = max(0, int(inactivity_sec - (now - self.below_threshold_start)))
-            
+
         self._broadcast_stats(speed_kb, disk_kb, active_items, net_status, timer_rem, self.countdown_remaining)
 
     def _start_countdown(self):
-        """Initiate the on-screen countdown warning dialog."""
         duration = self.config.get("countdown_duration_sec", 60)
         action = self.config.get("default_action", "shutdown")
         self.countdown_start = time.time()
         self.countdown_remaining = duration
         self.current_state = MonitorState.COUNTDOWN
-        self.status_message = f"Warning: Action scheduled in {duration}s"
-        
-        logger.warning(f"Countdown started! {duration}s until '{action}'.")
+        self.status_message = f"Action scheduled in {duration}s"
+
+        logger.warning(f"Download completed! Countdown started: {duration}s until '{action}'.")
         if self.config.get("sound_alerts_enabled", True):
             SoundManager.alert_warning()
-            
+
         self.countdown_started.emit(duration, action)
 
     def _trigger_final_action(self):
-        """Execute the configured system action."""
         self.current_state = MonitorState.EXECUTING
         action = self.config.get("default_action", "shutdown")
         force = self.config.get("force_action", True)
         self.status_message = f"Executing '{action}'..."
         logger.info(f"Executing scheduled action: {action}")
-        
+
         if self.config.get("sound_alerts_enabled", True):
             SoundManager.alert_completed()
-            
+
         self.action_executed.emit(action)
         SystemPowerController.execute_action(action, force)
         self.current_state = MonitorState.COMPLETED
         self.is_enabled = False
 
-    def _broadcast_stats(self, speed_kb: float, disk_kb: float, active_items: list, 
+    def _broadcast_stats(self, speed_kb: float, disk_kb: float, active_items: list,
                          net_status: dict, timer_remaining: int, countdown_remaining: int):
-        """Emit comprehensive stats package to GUI views."""
         snapshot = {
             "is_enabled": self.is_enabled,
             "state": self.current_state,
@@ -383,5 +372,7 @@ class MonitorEngine(QObject):
             "offline_duration_sec": net_status.get("offline_duration_sec", 0),
             "timer_remaining_sec": timer_remaining,
             "countdown_remaining_sec": countdown_remaining,
+            "target_mode": self.target_mode,
+            "selected_item_ids": list(self.selected_item_ids)
         }
         self.stats_updated.emit(snapshot)
