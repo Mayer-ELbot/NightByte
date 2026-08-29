@@ -137,8 +137,8 @@ Feel free to check the [issues page](https://github.com/Mayer-ELbot/NightByte/is
 
 ## 🙏 Acknowledgements & Credits / شكر وتقدير
 
-- Inspired by and built upon the foundational concept of [SteamDown](https://github.com/Avaneesh13/SteamDown) by [@Avaneesh13](https://github.com/Avaneesh13) under the MIT License.
-- Completely rebuilt, redesigned, and expanded into a multi-platform, AI-smart download guardian suite.
+- Inspired by the concept of [SteamDown](https://github.com/Avaneesh13/SteamDown) by [@Avaneesh13](https://github.com/Avaneesh13).
+- Built independently from scratch with a completely new architecture, multi-platform engine, network guardian, and modern interface under the MIT License.
 
 ---
 
