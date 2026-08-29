@@ -43,8 +43,7 @@ Thank you for your interest in contributing to **NightByte AI**! We welcome cont
 
 ## 🎨 Code Style Guidelines
 - Follow PEP 8 guidelines for Python code.
-- Keep the UI clean, minimalist, and accessible (WCAG AA contrast).
-- All user-facing strings must be added to both `'ar'` and `'en'` dictionaries in `src/i18n/translations.py`.
+- All user-facing strings are maintained cleanly in `src/i18n/translations.py`.
 
 ---
 
