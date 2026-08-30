@@ -1,6 +1,7 @@
 """
 NightByte AI - Master GUI Main Window
 Inverted monochrome dark. English-only. Zero clutter. Bold minimalist design.
+Displays live downloads, session completed history, and system action schedules.
 """
 
 import os
@@ -21,6 +22,7 @@ from utils.updater import UpdateChecker, CURRENT_VERSION
 from core.monitor_engine import MonitorEngine, MonitorState
 from gui.widgets.speed_graph import SpeedGraph
 from gui.widgets.download_card import DownloadCard
+from gui.widgets.history_card import HistoryCard
 from gui.widgets.platform_chip import PlatformChip
 from gui.countdown_dialog import CountdownWarningDialog
 from gui.settings_dialog import SettingsScreen
@@ -65,10 +67,11 @@ class MainWindow(QWidget):
         self.countdown_dialog = None
         self.latest_update_url = ""
         self.active_cards: dict[str, DownloadCard] = {}
+        self.history_cards_ids = set()
 
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
-        self.resize(740, 620)
-        self.setMinimumSize(640, 520)
+        self.resize(750, 640)
+        self.setMinimumSize(660, 540)
         self.dragging = False
         self.drag_position = QPoint()
 
@@ -164,7 +167,7 @@ class MainWindow(QWidget):
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.addTab(self._tab_dashboard(), "  Dashboard  ")
-        self.tabs.addTab(self._tab_downloads(), "  Downloads  ")
+        self.tabs.addTab(self._tab_downloads(), "  Downloads & History  ")
         self.tabs.addTab(self._tab_log(), "  Live Log  ")
         self.tabs.addTab(self._make_settings_tab(), "  Settings  ")
         return self.tabs
@@ -277,16 +280,17 @@ class MainWindow(QWidget):
         w.setLayout(lay)
         return w
 
-    # ── Downloads Tab ─────────────────────────────────────────────────────────
+    # ── Downloads & History Tab ───────────────────────────────────────────────
 
     def _tab_downloads(self) -> QWidget:
         w = QWidget()
         lay = _v(12, (16, 16, 16, 16))
 
-        # Target mode
+        # Target mode & Session summary banner
         mode_frame = QFrame()
         mode_frame.setObjectName("ModeFrame")
         ml = _h(14, (14, 10, 14, 10))
+
         lbl = _lbl(t("target_mode_label"), "ActionLabel")
         ml.addWidget(lbl)
         ml.addSpacing(6)
@@ -300,27 +304,65 @@ class MainWindow(QWidget):
         ml.addWidget(self.mode_all_radio)
         ml.addWidget(self.mode_sel_radio)
         ml.addStretch()
+
+        # Session data pill
+        self.session_data_pill = QLabel("Session: 0 MB")
+        self.session_data_pill.setStyleSheet("""
+            background-color: #1c1c1c;
+            border: 1px solid #282828;
+            border-radius: 6px;
+            padding: 3px 8px;
+            color: #888888;
+            font-size: 11px;
+            font-weight: 700;
+        """)
+        ml.addWidget(self.session_data_pill)
+
         mode_frame.setLayout(ml)
         lay.addWidget(mode_frame)
 
-        # Card scroll area
+        # Scroll Area for Active & Completed Downloads
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.NoFrame)
 
-        self.cards_container = QWidget()
+        self.content_box = QWidget()
+        self.content_box_layout = _v(14)
+        self.content_box_layout.setAlignment(Qt.AlignTop)
+
+        # Section 1: Active Downloads
+        active_sec_header = _h(0)
+        active_sec_header.addWidget(_lbl("Active Downloads", "ActionLabel"))
+        self.content_box_layout.addLayout(active_sec_header)
+
+        self.active_container = QWidget()
         self.cards_layout = _v(8)
         self.cards_layout.setAlignment(Qt.AlignTop)
-
-        self.empty_lbl = _lbl(t("no_downloads"), "StatusText")
-        self.empty_lbl.setWordWrap(True)
+        self.empty_lbl = _lbl("No active downloads detected.", "StatusText")
         self.empty_lbl.setAlignment(Qt.AlignCenter)
         self.cards_layout.addWidget(self.empty_lbl)
+        self.active_container.setLayout(self.cards_layout)
+        self.content_box_layout.addWidget(self.active_container)
 
-        self.cards_container.setLayout(self.cards_layout)
-        scroll.setWidget(self.cards_container)
+        # Section 2: Session Completed History
+        hist_sec_header = _h(0)
+        hist_sec_header.addWidget(_lbl("Session Completed History", "ActionLabel"))
+        self.content_box_layout.addLayout(hist_sec_header)
+
+        self.history_container = QWidget()
+        self.history_layout = _v(8)
+        self.history_layout.setAlignment(Qt.AlignTop)
+        self.empty_hist_lbl = _lbl("No completed downloads in this session yet.", "StatusText")
+        self.empty_hist_lbl.setAlignment(Qt.AlignCenter)
+        self.history_layout.addWidget(self.empty_hist_lbl)
+        self.history_container.setLayout(self.history_layout)
+        self.content_box_layout.addWidget(self.history_container)
+
+        self.content_box.setLayout(self.content_box_layout)
+        scroll.setWidget(self.content_box)
         lay.addWidget(scroll, 1)
+
         w.setLayout(lay)
         return w
 
@@ -406,6 +448,8 @@ class MainWindow(QWidget):
         speed_kb = snapshot.get("download_speed_kb", 0.0)
         is_online = snapshot.get("is_online", True)
         active_items = snapshot.get("active_items", [])
+        completed_items = snapshot.get("completed_items", [])
+        tot_session_bytes = snapshot.get("total_session_bytes", 0)
 
         # Update button state
         self.power_btn.setProperty("active", str(is_running).lower())
@@ -422,6 +466,14 @@ class MainWindow(QWidget):
             self.speed_unit.setText("KB/s")
 
         self.graph.add_point(speed_kb)
+
+        # Update session data pill
+        if tot_session_bytes >= 1024**3:
+            self.session_data_pill.setText(f"Session: {tot_session_bytes / (1024**3):.2f} GB")
+        elif tot_session_bytes >= 1024**2:
+            self.session_data_pill.setText(f"Session: {tot_session_bytes / (1024**2):.1f} MB")
+        else:
+            self.session_data_pill.setText(f"Session: {tot_session_bytes / 1024:.0f} KB")
 
         # Update network status badge
         if is_online:
@@ -451,10 +503,11 @@ class MainWindow(QWidget):
         self.tray.update_status(msg, running=is_running)
         self.tray.set_countdown_active(state == MonitorState.COUNTDOWN)
 
-        # Update download cards
+        # Update active download cards & completed history cards
         self._update_download_cards(active_items)
+        self._update_history_cards(completed_items)
 
-        # Log item if state transition or meaningful message
+        # Log significant state transitions
         if is_running and state in (MonitorState.COUNTDOWN, MonitorState.PAUSED_NET_DROP, MonitorState.PAUSED_AFK):
             self._log_feed(f"[{state}] {msg}")
 
@@ -475,15 +528,26 @@ class MainWindow(QWidget):
                 continue
             if iid not in self.active_cards:
                 is_selected = iid in self.engine.selected_item_ids if self.engine.selected_item_ids else True
-                card = DownloadCard(item, is_selected=is_selected, parent=self.cards_container)
+                card = DownloadCard(item, is_selected=is_selected, parent=self.active_container)
                 card.selection_changed.connect(self.engine.toggle_item_selection)
                 self.cards_layout.insertWidget(0, card)
                 self.active_cards[iid] = card
-                self._log_feed(f"Detected download: {item.get('name', 'App')} ({item.get('platform', 'App').upper()})")
+                self._log_feed(f"Detected active download: {item.get('name', 'App')} ({item.get('platform', 'App').upper()})")
             else:
                 self.active_cards[iid].update_data(item)
 
         self.empty_lbl.setVisible(len(self.active_cards) == 0)
+
+    def _update_history_cards(self, completed_items: list):
+        for item in completed_items:
+            iid = item.get("id", "")
+            if iid and iid not in self.history_cards_ids:
+                card = HistoryCard(item, parent=self.history_container)
+                self.history_layout.insertWidget(0, card)
+                self.history_cards_ids.add(iid)
+                self._log_feed(f"Completed in this session: {item.get('name')} (Duration: {item.get('duration_str')}, Avg: {item.get('avg_speed_str')})")
+
+        self.empty_hist_lbl.setVisible(len(self.history_cards_ids) == 0)
 
     def _log_feed(self, msg: str):
         item = QListWidgetItem(msg)
